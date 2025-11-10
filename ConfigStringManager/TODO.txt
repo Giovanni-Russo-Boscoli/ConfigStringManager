@@ -1,0 +1,3 @@
+﻿Fix Layout and colors
+Throw exceptions
+Add buttons to change all the files (maybe a selectable option to select individual files)
