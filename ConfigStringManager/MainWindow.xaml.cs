@@ -1,17 +1,11 @@
 ﻿using Microsoft.Data.SqlClient;
-using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Xml.Linq;
 using MessageBox = System.Windows.MessageBox;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
-using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 
 namespace ConfigStringManager
 {
@@ -138,7 +132,6 @@ namespace ConfigStringManager
         private void RefreshUI()
         {
             FilesTree.Items.Clear();
-            //FilesHint.Visibility = aliases.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             foreach (var a in aliases)
             {
@@ -147,6 +140,8 @@ namespace ConfigStringManager
                 root.Selected += Root_Selected;
                 root.Items.Add(new TreeViewItem { Header = "(expand to load)" });
                 FilesTree.Items.Add(root);
+                AliasPanel.Visibility = Visibility.Collapsed;
+                ConnStringsPanel.Visibility = Visibility.Collapsed;
             }
 
             RenderServerList();
@@ -177,6 +172,7 @@ namespace ConfigStringManager
         {
             ServerCombo.IsEnabled = enabled;
             DatabaseCombo.IsEnabled = enabled;
+            btnSaveChanges.IsEnabled = enabled;
         }
 
         #endregion
@@ -234,9 +230,13 @@ namespace ConfigStringManager
             currentAlias = alias;
             AliasBox.Text = alias.Alias;
             FilePathText.Text = alias.Path;
-            ConnNameText.Text = "";
+            ConnNameText.Text = string.Empty;
             PanelConnEnabled(false);
-            StatusText.Text = "";
+            StatusText.Text = string.Empty;
+            StatusTextFileServers.Text = string.Empty;
+            AliasPanel.Visibility = Visibility.Visible;
+            ConnStringsPanel.Visibility = Visibility.Collapsed;
+            PopulateFileServersCombo();
         }
 
         private void Conn_Selected(object sender, RoutedEventArgs e)
@@ -244,6 +244,10 @@ namespace ConfigStringManager
             e.Handled = true;
             if (sender is not TreeViewItem item) return;
             if (item.Tag is not Tuple<AliasItem, XElement> tuple) return;
+
+            ServerCombo.Text = string.Empty;
+            DatabaseCombo.Text = string.Empty;
+            StatusTextFileServers.Text = string.Empty;
 
             currentAlias = tuple.Item1;
             var element = tuple.Item2;
@@ -263,11 +267,22 @@ namespace ConfigStringManager
 
             PanelConnEnabled(true);
             StatusText.Text = "";
+
+            AliasPanel.Visibility = Visibility.Collapsed;
+            ConnStringsPanel.Visibility = Visibility.Visible;
         }
 
         #endregion
 
         #region Server management UI
+
+        private async void BtnCopyFilePath_Click(object sender, RoutedEventArgs e) 
+        {
+            System.Windows.Clipboard.SetText(FilePathText.Text);
+            CopiedTextStatus.Visibility = Visibility.Visible;
+            await Task.Delay(1000);
+            CopiedTextStatus.Visibility = Visibility.Collapsed;
+        }
 
         private void BtnAddServer_Click(object sender, RoutedEventArgs e)
         {
@@ -291,21 +306,6 @@ namespace ConfigStringManager
             ServerNameBox.Text = ServerAddressBox.Text = "";
             SqlUserBox.Text = SqlPassBox.Password = "";
             UseSqlAuthCheck.IsChecked = false;
-        }
-
-        private void BtnUpdateServer_Click(object sender, RoutedEventArgs e)
-        {
-            if (ServersListBox.SelectedItem == null) return;
-            dynamic sel = ServersListBox.SelectedItem;
-            var entry = sel.Entry as ServerEntry;
-            if (entry == null) return;
-
-            entry.Name = ServerNameBox.Text?.Trim() ?? entry.Name;
-            entry.Address = ServerAddressBox.Text?.Trim() ?? entry.Address;
-            entry.UseSqlAuth = UseSqlAuthCheck.IsChecked == true;
-            entry.Username = SqlUserBox.Text ?? entry.Username;
-            entry.Password = SqlPassBox.Password ?? entry.Password;
-            SaveServers();
         }
 
         private void BtnRemoveServer_Click(object sender, RoutedEventArgs e)
@@ -353,6 +353,74 @@ namespace ConfigStringManager
         private void PopulateServerCombo(string fileServer)
         {
             Dispatcher.Invoke(() => RenderServerComboItems(fileServer));
+        }
+
+        private void RenderFileServersCombo(string fileServer)
+        {
+            var list = new List<string>();
+            if (!string.IsNullOrWhiteSpace(fileServer)) list.Add(fileServer);
+            foreach (var s in servers)
+            {
+                if (!list.Any(x => string.Equals(x, s.Address, StringComparison.OrdinalIgnoreCase)))
+                    list.Add(s.Address);
+            }
+
+            FileServersCombo.ItemsSource = list;
+            if (!string.IsNullOrWhiteSpace(fileServer)) FileServersCombo.SelectedItem = fileServer;
+            else if (list.Count > 0) FileServersCombo.SelectedIndex = 0;
+        }
+
+        private void PopulateFileServersCombo()
+        {
+            Dispatcher.Invoke(() => RenderFileServersCombo(string.Empty));
+        }
+
+        private async void BtnUpdateServersOnFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (currentAlias == null || AliasBox.Text.Equals(string.Empty))
+            {
+                StatusTextFileServers.Text = "No file/alias selected.";
+                return;
+            }
+
+            if (MessageBox.Show($"Update the server value for ALL the connection strings in the file: '{currentAlias.Alias}'?", "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.No)
+            {
+                return;
+            }
+
+            try
+            {
+                var filePath = currentAlias.Path;
+                if (!File.Exists(filePath))
+                {
+                    StatusTextFileServers.Text = "File not found.";
+                    return;
+                }
+
+                var xml = XDocument.Load(filePath);
+                var conns = xml.Descendants().Where(x => 
+                    string.Equals(x.Name.LocalName, "add", StringComparison.OrdinalIgnoreCase) &&
+                    (x.Attribute("connectionString") != null)).Select(x=>x);
+
+                foreach (var item in conns)
+                {
+                    var old = (string)item.Attribute("connectionString") ?? "";
+                    var newServer = FileServersCombo.Text?.Trim() ?? "";
+                    var updated = UpdateConnectionString(old, newServer, string.Empty, true);
+                    item.SetAttributeValue("connectionString", updated);
+                }
+
+                xml.Save(filePath);
+                StatusTextFileServers.Text = "Saved!";
+                await Task.Delay(3000);
+                StatusTextFileServers.Text = string.Empty;
+                LoadAliases();
+                RefreshUI();
+            }
+            catch (Exception ex)
+            {
+                StatusTextFileServers.Text = "Error: " + ex.Message;
+            }
         }
 
         #endregion
@@ -448,6 +516,7 @@ namespace ConfigStringManager
             ServerTestResult.Text = "Testing...";
             var ok = await TestSqlConnectionAsync(entry);
             ServerTestResult.Text = ok ? "✅ Connection successful." : "❌ Connection failed (see console).";
+            ServerTestResult.Foreground = ok ? System.Windows.Media.Brushes.Green : System.Windows.Media.Brushes.Red;
         }
 
         private Task<bool> TestSqlConnectionAsync(ServerEntry entry)
@@ -488,46 +557,6 @@ namespace ConfigStringManager
             });
         }
 
-        //private void BtnExportServers_Click(object sender, RoutedEventArgs e)
-        //{
-        //    var dlg = new SaveFileDialog { Filter = "JSON files (*.json)|*.json", FileName = "servers.json" };
-        //    if (dlg.ShowDialog() == true)
-        //    {
-        //        try
-        //        {
-        //            File.WriteAllText(dlg.FileName, JsonSerializer.Serialize(servers, new JsonSerializerOptions { WriteIndented = true }));
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            MessageBox.Show("Export failed: " + ex.Message);
-        //        }
-        //    }
-        //}
-
-        //private void BtnImportServers_Click(object sender, RoutedEventArgs e)
-        //{
-        //    var dlg = new OpenFileDialog { Filter = "JSON files (*.json)|*.json" };
-        //    if (dlg.ShowDialog() == true)
-        //    {
-        //        try
-        //        {
-        //            var json = File.ReadAllText(dlg.FileName);
-        //            var imported = JsonSerializer.Deserialize<List<ServerEntry>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<ServerEntry>();
-        //            // merge: avoid duplicate addresses
-        //            foreach (var s in imported)
-        //            {
-        //                if (!servers.Any(x => string.Equals(x.Address, s.Address, StringComparison.OrdinalIgnoreCase)))
-        //                    servers.Add(s);
-        //            }
-        //            SaveServers();
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            MessageBox.Show("Import failed: " + ex.Message);
-        //        }
-        //    }
-        //}
-
         #endregion
 
         #region Save connection
@@ -565,7 +594,7 @@ namespace ConfigStringManager
                 var newServer = ServerCombo.Text?.Trim() ?? "";
                 var newDb = DatabaseCombo.Text?.Trim() ?? "";
 
-                var updated = UpdateConnectionString(old, newServer, newDb);
+                var updated = UpdateConnectionString(old, newServer, newDb, false);
                 add.SetAttributeValue("connectionString", updated);
 
                 xml.Save(filePath);
@@ -580,7 +609,7 @@ namespace ConfigStringManager
             }
         }
 
-        private static string UpdateConnectionString(string original, string newServer, string newDb)
+        private static string UpdateConnectionString(string original, string newServer, string newDb, bool onlyServer)
         {
             if (original == null) original = "";
             var parts = original.Split(';').Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList();
@@ -596,7 +625,7 @@ namespace ConfigStringManager
                     parts[i] = "Server=" + newServer;
                     serverSet = true;
                 }
-                else if (key.Equals("Database", StringComparison.OrdinalIgnoreCase) || key.Equals("Initial Catalog", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals("Database", StringComparison.OrdinalIgnoreCase) || key.Equals("Initial Catalog", StringComparison.OrdinalIgnoreCase) && !onlyServer)
                 {
                     parts[i] = "Database=" + newDb;
                     dbSet = true;
@@ -605,7 +634,7 @@ namespace ConfigStringManager
 
             if (!serverSet && !string.IsNullOrEmpty(newServer))
                 parts.Add("Server=" + newServer);
-            if (!dbSet && !string.IsNullOrEmpty(newDb))
+            if (!dbSet && !string.IsNullOrEmpty(newDb) && !onlyServer)
                 parts.Add("Database=" + newDb);
 
             var s = string.Join(";", parts);
@@ -630,12 +659,6 @@ namespace ConfigStringManager
                 SaveAliases();
             }
         }
-
-        //private void BtnReload_Click(object sender, RoutedEventArgs e)
-        //{
-        //    LoadAliases();
-        //    RefreshUI();
-        //}
 
         private void BtnSaveAlias_Click(object sender, RoutedEventArgs e)
         {

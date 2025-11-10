@@ -4,12 +4,6 @@
         Title="Config String Manager" Height="760" Width="1280"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
-        <!--<SolidColorBrush x:Key="WindowBackgroundBrush" Color="#0B1216"/>
-        <SolidColorBrush x:Key="PanelBrush" Color="#0F1720"/>
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#1F2A33"/>
-        <SolidColorBrush x:Key="TextBrush" Color="#E6EEF3"/>
-        <SolidColorBrush x:Key="MutedBrush" Color="#9AA3AD"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#22C1C3"/>-->
         <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#EFEFEF"/>
         <SolidColorBrush x:Key="PanelBrush" Color="#EFEFFF"/>
         <SolidColorBrush x:Key="PanelBorderBrush" Color="#D2D2D2"/>
@@ -36,7 +30,7 @@
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="FontWeight" Value="Bold" />
-                    
+
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="#E3E3E3"/>
@@ -74,13 +68,9 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
                     <Button Content="Add File" Click="BtnAddFile_Click" />
-                    <Button Content="Reload" Click="BtnReload_Click" Margin="6,0,0,0"/>
                     <Button Content="Remove File" Click="BtnRemoveFile_Click" Margin="6,0,0,0"/>
                 </StackPanel>
-
-                <!--<TextBlock Text="Files (aliases)" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" Margin="0,0,0,8"/>-->
                 <TreeView x:Name="FilesTree" Width="280"/>
-                <!--<TextBlock x:Name="FilesHint" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,8,0,0" Text="No files added yet."/>-->
             </DockPanel>
         </Border>
 
@@ -89,52 +79,74 @@
             <StackPanel>
                 <TextBlock Text="Edit Selected" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
-                <!-- Alias edit row -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
-                    <StackPanel Width="70">
-                        <TextBlock Text="Alias" Foreground="{StaticResource MutedBrush}"/>
+                <StackPanel x:Name="AliasPanel" Visibility="Collapsed">
+                    <Separator Margin="0,4,0,8"/>
+                    <!-- Alias edit row -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
+                        <StackPanel Width="70">
+                            <TextBlock Text="Alias" Foreground="{StaticResource MutedBrush}"/>
+                        </StackPanel>
+                        <TextBox x:Name="AliasBox" MinWidth="300" TextChanged="AliasBox_TextChanged" Width="140" />
+                        <Button Content="Save Alias" Click="BtnSaveAlias_Click" Margin="0"/>
                     </StackPanel>
-                    <TextBox x:Name="AliasBox" MinWidth="300" TextChanged="AliasBox_TextChanged" Width="140" />
-                    <Button Content="Save Alias" Click="BtnSaveAlias_Click" Margin="8,0,0,0"/>
-                </StackPanel>
 
-                <!-- File path -->
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                    <StackPanel Width="70">
-                        <TextBlock Text="File" Foreground="{StaticResource MutedBrush}"/>
+                    <!-- File path -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <StackPanel Width="70">
+                            <TextBlock Text="File" Foreground="{StaticResource MutedBrush}" />
+                        </StackPanel>
+                        <TextBlock x:Name="FilePathText" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" MinWidth="300" MaxWidth="300"/>
+                        <Button x:Name="btnCopyText" Click="BtnCopyFilePath_Click" Content="Copy" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6" Margin="0"/>
                     </StackPanel>
-                    <TextBlock x:Name="FilePathText" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+
+                    <StackPanel x:Name="CopiedTextStatus" Orientation="Horizontal" Margin="0,0,0,12" Visibility="Collapsed">
+                        <TextBlock Text="Path copied!" Foreground="DarkRed" MinWidth="300" MaxWidth="300" FontWeight="Bold"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <StackPanel Width="70">
+                            <TextBlock Text="Server" Foreground="{StaticResource MutedBrush}"/>
+                        </StackPanel>
+                        <ComboBox x:Name="FileServersCombo" MinWidth="300" IsEditable="False"/>
+                        <Button x:Name="btnUpdateFileServers" Click="BtnUpdateServersOnFile_Click" Content="Update" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6" Margin="0"/>
+
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock x:Name="StatusTextFileServers" Foreground="DarkRed" FontWeight="Bold" Margin="10,6,0,0"/>
+                    </StackPanel>
+
                 </StackPanel>
 
                 <Separator Margin="0,4,0,8"/>
 
-                <!-- Connection entry -->
-                <TextBlock Text="Connection" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <StackPanel Width="70">
-                        <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}"/>
+                <StackPanel x:Name="ConnStringsPanel" Visibility="Collapsed">
+                    <!-- Connection entry -->
+                    <TextBlock Text="Connection" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <StackPanel Width="70">
+                            <TextBlock Text="Name" Foreground="{StaticResource MutedBrush}"/>
+                        </StackPanel>
+                        <TextBlock x:Name="ConnNameText" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock x:Name="ConnNameText" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
-                </StackPanel>
 
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <StackPanel Width="70">
-                        <TextBlock Text="Server" Foreground="{StaticResource MutedBrush}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <StackPanel Width="70">
+                            <TextBlock Text="Server" Foreground="{StaticResource MutedBrush}"/>
+                        </StackPanel>
+                        <ComboBox x:Name="ServerCombo" MinWidth="300" IsEditable="False" SelectionChanged="ServerCombo_SelectionChanged"/>
                     </StackPanel>
-                    <ComboBox x:Name="ServerCombo" MinWidth="300" IsEditable="True" SelectionChanged="ServerCombo_SelectionChanged"/>
-                    <!--<Button Content="Load DBs" Click="BtnLoadDbs_Click" Margin="8,0,0,0"/>-->
-                </StackPanel>
 
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                    <StackPanel Width="70">
-                        <TextBlock Text="Database" Foreground="{StaticResource MutedBrush}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <StackPanel Width="70">
+                            <TextBlock Text="Database" Foreground="{StaticResource MutedBrush}"/>
+                        </StackPanel>
+                        <ComboBox x:Name="DatabaseCombo" MinWidth="300" IsEditable="True"/>
                     </StackPanel>
-                    <ComboBox x:Name="DatabaseCombo" MinWidth="300" IsEditable="True"/>
-                </StackPanel>
 
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="Save Changes" Click="BtnSaveConn_Click" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6"/>
-                    <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Margin="10,6,0,0"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="btnSaveChanges"  Content="Save Changes" Click="BtnSaveConn_Click" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6"/>
+                        <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Margin="10,6,0,0"/>
+                    </StackPanel>
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -142,7 +154,7 @@
         <!-- RIGHT: Server manager -->
         <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Grid.ColumnSpan="2" Margin="386,0,0,0">
             <StackPanel>
-                <TextBlock Text="Servers (friendly list)" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <TextBlock Text="Servers" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                     <StackPanel>
@@ -158,21 +170,18 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
                     <CheckBox x:Name="UseSqlAuthCheck" Content="Use SQL Auth" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBox x:Name="SqlUserBox" Width="162" Margin="0,0,6,0"/>
-                    <PasswordBox x:Name="SqlPassBox" Width="172" />
+                    <PasswordBox x:Name="SqlPassBox" Width="172" BorderBrush="{StaticResource PanelBorderBrush}" VerticalAlignment="Center" Padding="0,8"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Content="Add Server" Click="BtnAddServer_Click" />
+                    <Button Content="Add Server" Click="BtnAddServer_Click" Margin="0,0,6,0" />
                     <Button Content="Test Connection" Click="BtnTestConnection_Click" Margin="0,0,6,0"/>
-                    <Button Content="Remove Selected" Click="BtnRemoveServer_Click"/>
-                    <!--<Button Content="Update Selected" Click="BtnUpdateServer_Click" Margin="6,0,0,0"/>
-                    <Button Content="Import" Click="BtnImportServers_Click" Margin="6,0,0,0"/>
-                    <Button Content="Export" Click="BtnExportServers_Click" Margin="6,0,0,0"/>-->
+                    <Button Content="Remove Selected" Click="BtnRemoveServer_Click" Margin="0,0,6,0"/>
                 </StackPanel>
 
                 <ListBox x:Name="ServersListBox" Height="300" DisplayMemberPath="Display" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                   
+
                 </StackPanel>
                 <TextBlock x:Name="ServerTestResult" Foreground="red" Margin="0,8,0,0"/>
             </StackPanel>
