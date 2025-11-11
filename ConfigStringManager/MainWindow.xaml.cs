@@ -25,7 +25,8 @@ namespace ConfigStringManager
         {
             InitializeComponent();
 
-            appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ConfigStringManager");
+            //appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ConfigStringManager");
+            appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "ConfigStringManager");
             Directory.CreateDirectory(appFolder);
             aliasesPath = Path.Combine(appFolder, "config_files.json");
             serversPath = Path.Combine(appFolder, "servers.json");
@@ -140,8 +141,8 @@ namespace ConfigStringManager
                 root.Selected += Root_Selected;
                 root.Items.Add(new TreeViewItem { Header = "(expand to load)" });
                 FilesTree.Items.Add(root);
-                AliasPanel.Visibility = Visibility.Collapsed;
-                ConnStringsPanel.Visibility = Visibility.Collapsed;
+                //AliasPanel.Visibility = Visibility.Collapsed;
+                //ConnStringsPanel.Visibility = Visibility.Collapsed;
             }
 
             RenderServerList();
@@ -231,6 +232,7 @@ namespace ConfigStringManager
             AliasBox.Text = alias.Alias;
             FilePathText.Text = alias.Path;
             ConnNameText.Text = string.Empty;
+            ServerTestResult.Text = string.Empty;
             PanelConnEnabled(false);
             StatusText.Text = string.Empty;
             StatusTextFileServers.Text = string.Empty;
@@ -248,6 +250,7 @@ namespace ConfigStringManager
             ServerCombo.Text = string.Empty;
             DatabaseCombo.Text = string.Empty;
             StatusTextFileServers.Text = string.Empty;
+            ServerTestResult.Text = string.Empty;
 
             currentAlias = tuple.Item1;
             var element = tuple.Item2;
@@ -263,6 +266,11 @@ namespace ConfigStringManager
             var parsedDb = ParseConn(raw, new[] { "Database", "Initial Catalog" });
 
             PopulateServerCombo(parsedServer);
+
+            //Popoulate the database coming from the file first, then load others
+            DatabaseCombo.ItemsSource = new List<string>() { parsedDb };
+            DatabaseCombo.SelectedIndex = 0;
+
             PopulateDatabasesAsync(parsedServer, parsedDb);
 
             PanelConnEnabled(true);
@@ -286,9 +294,11 @@ namespace ConfigStringManager
 
         private void BtnAddServer_Click(object sender, RoutedEventArgs e)
         {
+            ServerTestResult.Text = string.Empty;
             var name = ServerNameBox.Text?.Trim();
             var addr = ServerAddressBox.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(addr)) { MessageBox.Show("Address required"); return; }
+            //if (string.IsNullOrWhiteSpace(addr)) { MessageBox.Show("Address required"); return; }
+            if (string.IsNullOrWhiteSpace(addr)) { ServerTestResult.Text = "Address required."; return; }
             if (servers.Any(s => string.Equals(s.Address, addr, StringComparison.OrdinalIgnoreCase)))
             {
                 MessageBox.Show("Server address already exists.");
@@ -310,10 +320,13 @@ namespace ConfigStringManager
 
         private void BtnRemoveServer_Click(object sender, RoutedEventArgs e)
         {
-            if (ServersListBox.SelectedItem == null) return;
+
+            ServerTestResult.Text = string.Empty;
+            if (ServersListBox.SelectedItem == null) { ServerTestResult.Text = "Select a server to be removed from the list"; return; }            
             dynamic sel = ServersListBox.SelectedItem;
             var entry = sel.Entry as ServerEntry;
             if (entry == null) return;
+
             if (MessageBox.Show($"Remove server '{entry.Name}'?", "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
             {
                 servers.RemoveAll(s => string.Equals(s.Address, entry.Address, StringComparison.OrdinalIgnoreCase));
@@ -435,7 +448,7 @@ namespace ConfigStringManager
 
         private async void PopulateDatabasesAsync(string serverAddress, string fileDb)
         {
-            DatabaseCombo.ItemsSource = null;
+            //DatabaseCombo.ItemsSource = null;
             var dbs = new List<string>();
 
             if (!string.IsNullOrWhiteSpace(serverAddress))
@@ -481,6 +494,7 @@ namespace ConfigStringManager
 
             Dispatcher.Invoke(() =>
             {
+                DatabaseCombo.ItemsSource = null;
                 DatabaseCombo.ItemsSource = dbs;
                 if (!string.IsNullOrWhiteSpace(fileDb) && dbs.Contains(fileDb)) DatabaseCombo.SelectedItem = fileDb;
                 else if (dbs.Count > 0) DatabaseCombo.SelectedIndex = 0;
@@ -503,12 +517,12 @@ namespace ConfigStringManager
 
         #endregion
 
-        #region Test connection / Import Export servers
+        #region Test connection
 
         private async void BtnTestConnection_Click(object sender, RoutedEventArgs e)
         {
             ServerTestResult.Text = "";
-            if (ServersListBox.SelectedItem == null) { ServerTestResult.Text = "Select a server on the right first."; return; }
+            if (ServersListBox.SelectedItem == null) { ServerTestResult.Text = "Select a server to test connection."; return; }
             dynamic sel = ServersListBox.SelectedItem;
             var entry = sel.Entry as ServerEntry;
             if (entry == null) { ServerTestResult.Text = "Invalid selection."; return; }
@@ -625,16 +639,16 @@ namespace ConfigStringManager
                     parts[i] = "Server=" + newServer;
                     serverSet = true;
                 }
-                else if (key.Equals("Database", StringComparison.OrdinalIgnoreCase) || key.Equals("Initial Catalog", StringComparison.OrdinalIgnoreCase) && !onlyServer)
+                else if (key.Equals("Database", StringComparison.OrdinalIgnoreCase) || key.Equals("Initial Catalog", StringComparison.OrdinalIgnoreCase))
                 {
-                    parts[i] = "Database=" + newDb;
+                    parts[i] = string.IsNullOrEmpty(newDb) ? parts[i] : ("Database=" + newDb);
                     dbSet = true;
                 }
             }
 
             if (!serverSet && !string.IsNullOrEmpty(newServer))
                 parts.Add("Server=" + newServer);
-            if (!dbSet && !string.IsNullOrEmpty(newDb) && !onlyServer)
+            if (!dbSet && !string.IsNullOrEmpty(newDb))
                 parts.Add("Database=" + newDb);
 
             var s = string.Join(";", parts);
