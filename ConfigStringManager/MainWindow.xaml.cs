@@ -1,184 +1,150 @@
-﻿using Enums.Services;
-using Microsoft.Data.SqlClient;
-using System.ComponentModel;
+﻿using Microsoft.Data.SqlClient;
+using System.Collections.ObjectModel;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
-using System.Xml;
 using System.Xml.Linq;
+using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
+using Brushes = System.Windows.Media.Brush;
 
 namespace ConfigStringManager
 {
     public partial class MainWindow : Window
     {
+        private readonly string userFolder = "ConfigStringManagerSetup";
         private readonly string appFolder;
         private readonly string aliasesPath;
-        private readonly string serversPath;
-        private readonly string ignoreListPath;
+        private readonly string envFileName = "bomiEnvironments.json";
 
-        private List<DevEnvironment> devEnvs = new();
+        public ObservableCollection<DevEnvironment> DevEnvs { get; } = new();
+
         private List<ServerEntry> servers = new();
-        private List<IgnoreListEntry> ignoreListEntries = new();
+        private static readonly HashSet<string> ignoreKeys = new(StringComparer.OrdinalIgnoreCase) 
+        { 
+            "DH2CRSCodesServer", // from STS.Web.config
+            "PerformanceEntities" // from Sdm.App.PubSub.Web.config & Sdm.App.Web.config
+        };
 
         private DevEnvironment currentDevEnv = null;
         private AliasItem currentAlias = null;
         private (string name, XElement element) currentConn = (null, null);
 
+        private CancellationTokenSource _dbLoadCts;
+        private bool _suppressServerComboEvent = false;
+        
+        private readonly Dictionary<string, List<string>> _databaseCache = new(StringComparer.OrdinalIgnoreCase);
+
         public MainWindow()
         {
             InitializeComponent();
-
-            appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "ConfigStringManager");
+            DataContext = this;
+            appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), userFolder);
             Directory.CreateDirectory(appFolder);
-            aliasesPath = Path.Combine(appFolder, "config_files.json");
-            serversPath = Path.Combine(appFolder, "servers.json");
-            ignoreListPath = Path.Combine(appFolder, "ignoreList.json");
+            aliasesPath = Path.Combine(appFolder, envFileName);
 
-            LoadServers();
-            LoadAliases();
+            servers = LoadServers();
+
+            LoadAliases(); 
+
             RefreshUI();
         }
 
-        #region Models
-
-        private enum AliasEnum
+    private static Task DoEventsAsync()
         {
-            [Description("SdmApp.WebConfig")]
-            SdmAppWebConfig = 1,
-            [Description("SdmApp.Web-bomi2AppSettings.config")]
-            SdmAppBOMi2WebConfig = 2,
-            [Description("SdmApp.PubSub.WebConfig")]
-            SdmAppPubSubWebConfig = 3,
-            [Description("SdmApp.PubSub.Web-bomi2AppSettings.config")]
-            SdmAppPubSubBOMi2WebConfig = 4,
-            [Description("SdmApp.MonitoringConfiguration")]
-            SdmAppMonitoringConfiguration = 5,
-            [Description("Sdm.Log4Net")]
-            SdmLog4Net = 6,
-            [Description("STS.WebConfig")]
-            STSWebConfig = 7
+            return Application.Current.Dispatcher.InvokeAsync(() => { },
+                System.Windows.Threading.DispatcherPriority.Background).Task;
         }
-
-        private class DevEnvironment
-        {
-            public string Name { get; set; }
-            public string PrefixPath { get; set; }
-            public string STSPrefixPath { get; set; }
-            public IList<AliasItem> Files { get { return getEnvironmentFiles(this); } }
-            private IList<AliasItem> getEnvironmentFiles(DevEnvironment _env)
-            {
-                return new List<AliasItem>
-            {
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmAppWebConfig, SufixPath = "Code\\DELIVERY\\business4\\Sdm.App\\Sdm.App\\Web.config", Environment = _env },
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmAppBOMi2WebConfig, SufixPath = "Code\\DELIVERY\\server\\asmx\\Web-bomi2AppSettings.config", Environment = _env },
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmAppPubSubWebConfig, SufixPath = "Code\\DELIVERY\\business4\\Sdm.App\\Sdm.App.PubSub\\Web.config", Environment = _env },
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmAppPubSubBOMi2WebConfig, SufixPath = "Code\\DELIVERY\\business4\\Sdm.App\\Sdm.App.PubSub\\bomi2\\server\\asmx\\Web-bomi2AppSettings.config", Environment = _env },
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmAppMonitoringConfiguration, SufixPath = "Code\\DELIVERY\\business4\\Sdm.App\\Sdm.App\\Config\\MonitoringConfiguration.xml", Environment = _env },
-                new AliasItem(){ Alias_Enum = AliasEnum.SdmLog4Net, SufixPath = "Code\\DELIVERY\\business4\\Sdm.App\\Sdm.App\\Config\\Sdm.Log4Net.xml", Environment = _env },
-                new AliasItem(){ IsSTS = true,  Alias_Enum = AliasEnum.STSWebConfig, SufixPath = "Sdm.App.STS\\Web.config", Environment = _env }
-            };
-            }
-        }
-
-        private class AliasItem
-        {
-            public AliasEnum Alias_Enum { get; set; }
-            public string Alias { get { return Alias_Enum.GetDescription(); } }
-            public string SufixPath { get; set; }
-            public DevEnvironment Environment { get; set; }
-            public bool IsSTS { get; set; }
-            public override string ToString() => $"{Alias} - ################################";
-            public string GetPath()
-            {
-                if (IsSTS)
-                    return Path.Combine(Environment.STSPrefixPath, SufixPath);
-                return Path.Combine(Environment.PrefixPath, SufixPath);
-            }
-        }
-
-        private class ServerEntry
-        {
-            public string Name { get; set; }
-            public string Address { get; set; }
-            public bool UseSqlAuth { get; set; }
-            public string Username { get; set; }
-            public string Password { get; set; }
-            public string Display => $"{Name} — {Address}" + (UseSqlAuth ? " (SQL Auth)" : " (Integrated)");
-        }
-
-        private class IgnoreListEntry
-        {
-            public string KeyEntry { get; set; }
-        }
-
-        #endregion
 
         #region Load/Save
 
-        private void LoadServers()
+        private List<ServerEntry> LoadServers()
         {
+            string filePath = GetServersFilePath();
+
+            // If file doesn't exist, create with defaults
+            if (!File.Exists(filePath))
+            {
+                var defaults = GetDefaultServers();
+                SaveServers(defaults);
+                return defaults;
+            }
+
+            // Try to load existing file
             try
             {
-                if (File.Exists(serversPath))
+                string json = File.ReadAllText(filePath);
+                var servers = JsonSerializer.Deserialize<List<ServerEntry>>(json);
+
+                // If file is empty or invalid, recreate defaults
+                if (servers == null || servers.Count == 0)
                 {
-                    var json = File.ReadAllText(serversPath);
-                    servers = JsonSerializer.Deserialize<List<ServerEntry>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<ServerEntry>();
+                    var defaults = GetDefaultServers();
+                    SaveServers(defaults);
+                    return defaults;
                 }
-                else
-                {
-                    servers = new List<ServerEntry>();
-                    SaveServers();
-                }
+
+                return servers;
             }
             catch
             {
-                servers = new List<ServerEntry>();
-            }
-            //RenderServerList();
-        }
-
-        private void SaveServers()
-        {
-            try
-            {
-                File.WriteAllText(serversPath, JsonSerializer.Serialize(servers, new JsonSerializerOptions { WriteIndented = true }));
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Failed to save servers.json: " + ex.Message);
+                // Corrupted file, recreate defaults
+                var defaults = GetDefaultServers();
+                SaveServers(defaults);
+                return defaults;
             }
         }
 
-        private void LoadAliases()
+        private void SaveServers(List<ServerEntry> servers)
         {
+            string filePath = GetServersFilePath();
+            string json = JsonSerializer.Serialize(servers, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(filePath, json);
+        }
+
+        public void LoadAliases()
+        {
+            DevEnvs.Clear();
+
             try
             {
                 if (File.Exists(aliasesPath))
                 {
                     var json = File.ReadAllText(aliasesPath);
-                    devEnvs = JsonSerializer.Deserialize<List<DevEnvironment>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<DevEnvironment>();
+                    var list = JsonSerializer.Deserialize<List<DevEnvironment>>(json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        ?? new List<DevEnvironment>();
+
+                    foreach (var env in list)
+                        DevEnvs.Add(env);
                 }
                 else
                 {
-                    devEnvs = new List<DevEnvironment>();
+                    var defaultEnv = new DevEnvironment()
+                    {
+                        Name = "INTEG MIRROR",
+                        PrefixPath = "D:\\YOUR_ENVIRONMENT_PATH\\Trunk\\",
+                        STSPrefixPath = "D:\\YOUR_STS_PATH\\Sdm.App.STS\\"
+                    };
+
+                    DevEnvs.Add(defaultEnv);
                     SaveAliases();
                 }
             }
             catch
             {
-                devEnvs = new List<DevEnvironment>();
+                // fallback to empty collection
             }
         }
+
 
         private void SaveAliases()
         {
             try
             {
-                File.WriteAllText(aliasesPath, JsonSerializer.Serialize(devEnvs, new JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(aliasesPath, JsonSerializer.Serialize(DevEnvs, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch (Exception ex)
             {
@@ -191,33 +157,37 @@ namespace ConfigStringManager
 
         #region UI Rendering
 
-        private void RefreshUI(DevEnvironment? envVisible = null, bool clearStatusText = true)
+        private void RefreshUI(string envVisible = "", bool clearStatusText = true)
         {
-            FilesTree.Items.Clear();
-
-            foreach (var a in devEnvs)
+            // Ensure each AliasItem has a placeholder child so it shows an expander
+            foreach (var env in DevEnvs)
             {
-                var env = new TreeViewItem { Header = a.Name, Tag = a };
-                env.Selected += Env_Selected;
-                if (envVisible != null && envVisible.Name == a.Name)
+                env.EnsureFilesInitialized();
+
+                foreach (var alias in env.Files)
                 {
-                    env.IsExpanded = true;
+                    if (alias.Children.Count == 0)
+                        alias.Children.Add(new MissingFileMessage { Message = "(expand to load)" });
                 }
+            }
 
-                FilesTree.Items.Add(env);
+            FilesTree.ItemsSource = null;
+            FilesTree.ItemsSource = DevEnvs;
 
-                foreach (var f in a.Files)
+            if (!string.IsNullOrEmpty(envVisible))
+            {
+                Dispatcher.InvokeAsync(() =>
                 {
-                    var root = new TreeViewItem { Header = $"{f.Alias}", Tag = f };
-                    root.Expanded += Root_Expanded;
-                    root.Selected += Root_Selected;
-                    root.Items.Add(new TreeViewItem { Header = "(expand to load)" });
-                    if (currentAlias != null && string.Equals(f.Alias, currentAlias.Alias, StringComparison.OrdinalIgnoreCase))
+                    foreach (var env in DevEnvs)
                     {
-                        root.IsExpanded = true;
+                        if (env.Name == envVisible)
+                        {
+                            var container = (TreeViewItem)FilesTree.ItemContainerGenerator.ContainerFromItem(env);
+                            if (container != null)
+                                container.IsExpanded = true;
+                        }
                     }
-                    env.Items.Add(root);
-                }
+                });
             }
 
             if (clearStatusText)
@@ -236,11 +206,7 @@ namespace ConfigStringManager
 
         private void clearMessages()
         {
-            //AliasBox.Text = "";
-            //FilePathText.Text = "";
-            //ConnNameText.Text = "";
             StatusText.Text = "";
-            //ServerTestResult.Text = "";
             StatusTextFileServers.Text = "";
         }
 
@@ -258,15 +224,18 @@ namespace ConfigStringManager
         private void Root_Expanded(object sender, RoutedEventArgs e)
         {
             if (sender is not TreeViewItem root) return;
-            if (root.Tag is not AliasItem alias) return;
+            if (root.DataContext is not AliasItem alias) return;
 
-            root.Items.Clear();
+            alias.Children.Clear();
 
-            var filePath = alias.GetPath();
+            var filePath = GetEnvironmentName(alias);
 
             if (!File.Exists(filePath))
             {
-                root.Items.Add(new TreeViewItem { Header = "(file not found)" });
+                alias.Children.Add(new MissingFileMessage
+                {
+                    Message = $"(File not found)\nCurrently reading from: {filePath}\nCheck file: {appFolder}\\{envFileName}"
+                });
                 return;
             }
 
@@ -299,121 +268,119 @@ namespace ConfigStringManager
 
                 if (!adds.Any() && !addsCustom.Any() && !addsCustom2.Any() && !addsCustom3.Any() && !addsCustom4.Any())
                 {
-                    root.Items.Add(new TreeViewItem { Header = "(no connection strings found)" });
+                    alias.Children.Add(new MissingFileMessage { Message = "(no connection strings found)" });
+                    return;
                 }
-                else
+
+                foreach (var add in adds)
                 {
-                    //WEBCONFIG & PUBSUB WEBCONFIG & STS
-                    foreach (var add in adds)
+                    var name = add.Attribute("name")?.Value ?? "(unnamed)";
+                    if (ignoreKeyList(name)) continue;
+
+                    alias.Children.Add(new ConnectionEntry
                     {
-                        var name = add.Attribute("name")?.Value ?? "(unnamed)";
-
-                        if (ignoreKeyList(name))
-                            continue;
-
-                        var child = new TreeViewItem { Header = name, Tag = new Tuple<AliasItem, XElement>(alias, add) };
-                        child.Selected += Conn_Selected;
-                        root.Items.Add(child);
-                    }
-
-                    //SESSION STATE (DBSECURITY)
-                    foreach (var add in addsCustom)
-                    {
-                        var name = add.Attribute("mode")?.Value ?? "(unnamed)";
-                        var child = new TreeViewItem { Header = name, Tag = new Tuple<AliasItem, XElement>(alias, add), Foreground = System.Windows.Media.Brushes.DarkGreen, FontWeight = FontWeights.Bold };
-                        child.Selected += Conn_Selected;
-                        root.Items.Add(child);
-                    }
-
-                    //ASMX/BOMI2 & PUBSUB/ASMX/BOMI2
-                    foreach (var add in addsCustom2)
-                    {
-                        var name = add.Attribute("key")?.Value ?? "(unnamed)";
-                        var child = new TreeViewItem { Header = name, Tag = new Tuple<AliasItem, XElement>(alias, add), Foreground = System.Windows.Media.Brushes.BlueViolet, FontWeight = FontWeights.Bold };
-                        child.Selected += Conn_Selected;
-                        root.Items.Add(child);
-                    }
-
-                    //PERFORMANCE - PROFILING (MonitoringConfiguration.xml)
-                    foreach (var add in addsCustom3)
-                    {
-                        var name = add.Attribute("name")?.Value ?? "(unnamed)";
-                        var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "Setting", StringComparison.OrdinalIgnoreCase) &&
-                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) && a.Value.Equals("ConnectionString"))).FirstOrDefault();
-
-                        var child = new TreeViewItem { Header = name, Tag = new Tuple<AliasItem, XElement>(alias, descendant), Foreground = System.Windows.Media.Brushes.DarkBlue, FontWeight = FontWeights.Bold };
-                        child.Selected += Conn_Selected;
-                        root.Items.Add(child);
-                    }
-
-                    //LOG4NET
-                    foreach (var add in addsCustom4)
-                    {
-                        var name = add.Attribute("name")?.Value ?? "(unnamed)";
-                        var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "connectionString", StringComparison.OrdinalIgnoreCase) &&
-                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "value", StringComparison.OrdinalIgnoreCase))).FirstOrDefault();//.Where(t=>t.Attribute("name")?.Value);
-                        var child = new TreeViewItem { Header = name, Tag = new Tuple<AliasItem, XElement>(alias, descendant) }; //, Foreground = System.Windows.Media.Brushes.DarkOrange, FontWeight = FontWeights.Bold };
-                        child.Selected += Conn_Selected;
-                        root.Items.Add(child);
-
-                    }
+                        Name = name,
+                        Alias = alias,
+                        Element = add,
+                        Foreground = System.Windows.Media.Brushes.Black
+                        //FontWeight = FontWeights.UltraBold
+                    });
                 }
+
+                foreach (var add in addsCustom)
+                {
+                    alias.Children.Add(new ConnectionEntry
+                    {
+                        Name = add.Attribute("mode")?.Value ?? "(unnamed)",
+                        Alias = alias,
+                        Element = add,
+                        Foreground = System.Windows.Media.Brushes.DarkGreen,
+                        FontWeight = FontWeights.Bold
+                    });
+                }
+
+                foreach (var add in addsCustom2)
+                {
+                    alias.Children.Add(new ConnectionEntry
+                    {
+                        Name = add.Attribute("key")?.Value ?? "(unnamed)",
+                        Alias = alias,
+                        Element = add,
+                        Foreground = System.Windows.Media.Brushes.BlueViolet,
+                        FontWeight = FontWeights.Bold
+                    });
+                }
+
+                foreach (var add in addsCustom3)
+                {
+                    var name = add.Attribute("name")?.Value ?? "(unnamed)";
+                    
+                    var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "Setting", StringComparison.OrdinalIgnoreCase) &&
+                                        x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) && a.Value.Equals("ConnectionString"))).FirstOrDefault();
+
+                    alias.Children.Add(new ConnectionEntry
+                    {
+                        Name = add.Attribute("name")?.Value ?? "(unnamed)",
+                        Alias = alias,
+                        Element = descendant,
+                        Foreground = System.Windows.Media.Brushes.DarkBlue,
+                        FontWeight = FontWeights.Bold
+                    });
+                }
+
+                foreach (var add in addsCustom4)
+                {
+                    var name = add.Attribute("name")?.Value ?? "(unnamed)";
+
+                    var descendant = add.Descendants()
+                        .Where(x => string.Equals(x.Name.LocalName, "connectionString", StringComparison.OrdinalIgnoreCase) &&
+                                    x.Attributes().Any(a => string.Equals(a.Name.LocalName, "value", StringComparison.OrdinalIgnoreCase)))
+                        .FirstOrDefault();
+
+                    alias.Children.Add(new ConnectionEntry
+                    {
+                        Name = name,
+                        Alias = alias,
+                        Element = descendant,   // IMPORTANT: use descendant, not add
+                        Foreground = System.Windows.Media.Brushes.Black,
+                        FontWeight = FontWeights.Bold
+                    });
+                }
+
             }
             catch (Exception ex)
             {
-                root.Items.Add(new TreeViewItem { Header = $"(error reading file: {ex.Message})" });
+                alias.Children.Add(new MissingFileMessage
+                {
+                    Message = $"(error reading file: {ex.Message})"
+                });
             }
         }
 
-        private bool ignoreKeyList(string _key)
-        {
-            if (File.Exists(ignoreListPath))
-            {
-                //FILE EXISTS, READ THE IGNORE LIST
-                var json = File.ReadAllText(ignoreListPath);
-                ignoreListEntries = JsonSerializer.Deserialize<List<IgnoreListEntry>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<IgnoreListEntry>();
-            }
-            else
-            {
-                //FILE DOESN'T EXIST
-                //CREATES A FILE WITH THE DEFAULT ITEM
-                ignoreListEntries = [
-                    new IgnoreListEntry() { KeyEntry = "DH2CRSCodesServer" },  //from STS.Web.config
-                new IgnoreListEntry() { KeyEntry = "PerformanceEntities" } //from Sdm.App.Web.config
-                    ];
-                try
-                {
-                    File.WriteAllText(ignoreListPath, JsonSerializer.Serialize(ignoreListEntries, new JsonSerializerOptions { WriteIndented = true }));
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Failed to save ignoreList.json: " + ex.Message);
-                }
-            }
 
-            return (ignoreListEntries.Any(s => string.Equals(s.KeyEntry, _key, StringComparison.OrdinalIgnoreCase)));
-        }
+        private bool ignoreKeyList(string key) { return ignoreKeys.Contains(key); }
 
         private void Env_Selected(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
-            if (sender is not TreeViewItem env) return;
 
-            if (env.Tag is not DevEnvironment devEnv) return;
+            if (sender is not TreeViewItem env) return;
+            if (env.DataContext is not DevEnvironment devEnv) return;
+
             env.IsExpanded = true;
             currentAlias = null;
             currentDevEnv = devEnv;
+
             AliasBox.Text = devEnv.Name;
             FilePathText.Visibility = Visibility.Collapsed;
             btnCopyText.Visibility = Visibility.Collapsed;
             lblFile.Visibility = Visibility.Collapsed;
             ConnNameText.Text = string.Empty;
-            //ServerTestResult.Text = string.Empty;
+
             PanelConnEnabled(false);
-            //StatusText.Text = string.Empty;
-            //StatusTextFileServers.Text = string.Empty;
             AliasPanel.Visibility = Visibility.Visible;
             ConnStringsPanel.Visibility = Visibility.Collapsed;
+
             PopulateFileServersCombo();
             clearMessages();
         }
@@ -421,132 +388,107 @@ namespace ConfigStringManager
         private void Root_Selected(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
-            if (sender is not TreeViewItem root) return;
 
-            if (root.Tag is not AliasItem alias) return;
+            if (sender is not TreeViewItem root) return;
+            if (root.DataContext is not AliasItem alias) return;
 
             currentDevEnv = null;
             currentAlias = alias;
+
             AliasBox.Text = alias.Alias;
             FilePathText.Visibility = Visibility.Visible;
             btnCopyText.Visibility = Visibility.Visible;
             lblFile.Visibility = Visibility.Visible;
-            FilePathText.Text = alias.GetPath();
+            FilePathText.Text = GetEnvironmentName(alias);
+
             ConnNameText.Text = string.Empty;
-            //ServerTestResult.Text = string.Empty;
+
             PanelConnEnabled(false);
-            //StatusText.Text = string.Empty;
-            //StatusTextFileServers.Text = string.Empty;
             AliasPanel.Visibility = Visibility.Visible;
             ConnStringsPanel.Visibility = Visibility.Collapsed;
+
             PopulateFileServersCombo();
             clearMessages();
         }
 
-        private void Conn_Selected(object sender, RoutedEventArgs e)
+        private async void Conn_Selected(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
             if (sender is not TreeViewItem item) return;
-            if (item.Tag is not Tuple<AliasItem, XElement> tuple) return;
+            if (item.DataContext is not ConnectionEntry entry) return;
 
-            //ServerCombo.Text = string.Empty;
-            //DatabaseCombo.Text = string.Empty;
+            // Cancel any previous DB load
+            _dbLoadCts?.Cancel();
+            _dbLoadCts = new CancellationTokenSource();
+            var token = _dbLoadCts.Token;
+
             StatusTextFileServers.Text = string.Empty;
             DatabaseCombo.ItemsSource = null;
-            //ServerTestResult.Text = string.Empty;
 
-            currentAlias = tuple.Item1;
-            var element = tuple.Item2;
-            var name = string.Empty;
-            var raw = string.Empty;
+            currentAlias = entry.Alias;
+            var element = entry.Element;
+
+            var name = "";
+            var raw = "";
 
             switch (currentAlias.Alias_Enum)
             {
-
                 case AliasEnum.SdmAppWebConfig:
                 case AliasEnum.SdmAppPubSubWebConfig:
                 case AliasEnum.SdmAppMonitoringConfiguration:
                 case AliasEnum.STSWebConfig:
-                    {
-                        //name
-                        if (element.Attribute("name") != null)
-                        {
-                            name = element.Attribute("name").Value;
-                        }
-                        else if (element.Attribute("mode") != null)
-                        {
-                            name = element.Attribute("mode").Value;
-                        }
+                    name = element.Attribute("name")?.Value
+                        ?? element.Attribute("mode")?.Value
+                        ?? "";
+                    raw = element.Attribute("connectionString")?.Value
+                        ?? element.Attribute("sqlConnectionString")?.Value
+                        ?? element.Attribute("value")?.Value
+                        ?? "";
+                    break;
 
-                        //raw
-                        if (element.Attribute("connectionString") != null)
-                        {
-                            raw = element.Attribute("connectionString").Value;
-                        }
-                        else if (element.Attribute("sqlConnectionString") != null)
-                        {
-                            raw = element.Attribute("sqlConnectionString").Value;
-                        }
-                        else if (element.Attribute("value") != null)
-                        {
-                            raw = element.Attribute("value").Value;
-                        }
-
-                        break;
-                    }
                 case AliasEnum.SdmAppBOMi2WebConfig:
                 case AliasEnum.SdmAppPubSubBOMi2WebConfig:
-                    {
-                        //name
-                        if (element.Attribute("key") != null)
-                        {
-                            name = element.Attribute("key").Value;
-                        }
+                    name = element.Attribute("key")?.Value ?? "";
+                    raw = element.Attribute("value")?.Value ?? "";
+                    break;
 
-                        //raw
-                        if (element.Attribute("value") != null)
-                        {
-                            raw = element.Attribute("value").Value;
-                        }
-
-                        break;
-                    }
                 case AliasEnum.SdmLog4Net:
-                    {
-                        var isLog4NetFile = element.Parent?.Attributes().Any(a => a.Name.LocalName.Equals("name") && a.Value.Equals("ErrorHandlerModule_SQLAppender"));
-
-                        //name
-                        if (isLog4NetFile != null && isLog4NetFile == true) //find a better and generic solution
-                        {
-                            name = "ErrorHandlerModule_SQLAppender";
-                        }
-
-                        //raw
-                        if (element.Attribute("value") != null)
-                        {
-                            raw = element.Attribute("value").Value;
-                        }
-
-                        break;
-                    }
+                    name = "ErrorHandlerModule_SQLAppender";
+                    raw = element.Attribute("value")?.Value ?? "";
+                    break;
             }
 
             name = name.Trim();
             currentConn = (name, element);
+
             AliasBox.Text = currentAlias.Alias;
-            FilePathText.Text = currentAlias.GetPath();
+            FilePathText.Text = GetEnvironmentName(currentAlias);
             ConnNameText.Text = name;
 
-            var parsedServer = ParseConn(raw, new[] { "Server", "Data Source", "Address", "Addr" });
-            var parsedDb = ParseConn(raw, new[] { "Database", "Initial Catalog" });
-            PopulateServerCombo(parsedServer);
-            PopulateDatabasesAsync(parsedServer, parsedDb);
+            var parsedServer = ParseConn(raw, new[] { "Server", "Data Source", "Address", "Addr" }).Trim('\'', ' ');
+            var parsedDb = ParseConn(raw, new[] { "Database", "Initial Catalog" }).Trim('\'', ' ');
+
+            // 🔥 Prevent ServerCombo_SelectionChanged from firing
+            _suppressServerComboEvent = true;
+
+            await PopulateServerComboAsync(parsedServer);
+
+            // Allow UI to update
+            await DoEventsAsync();
+
+            // Re-enable event
+            _suppressServerComboEvent = false;
+
+            // Now safely load DBs
+            await PopulateDatabasesAsync(parsedServer, parsedDb, token);
+
             PanelConnEnabled(true);
             StatusText.Text = "";
             AliasPanel.Visibility = Visibility.Collapsed;
             ConnStringsPanel.Visibility = Visibility.Visible;
             clearMessages();
         }
+
 
         #endregion
 
@@ -574,9 +516,12 @@ namespace ConfigStringManager
             else if (list.Count > 0) ServerCombo.SelectedIndex = 0;
         }
 
-        private void PopulateServerCombo(string fileServer)
+        private Task PopulateServerComboAsync(string fileServer)
         {
-            Dispatcher.Invoke(() => RenderServerComboItems(fileServer));
+            return Dispatcher.InvokeAsync(() =>
+            {
+                RenderServerComboItems(fileServer);
+            }).Task;
         }
 
         private void RenderFileServersCombo(string fileServer)
@@ -630,244 +575,11 @@ namespace ConfigStringManager
             }
         }
 
-        //private async void updateServersByFile(AliasItem _alias)
-        //{
-        //    try
-        //    {
-        //        var filePath = _alias.GetPath();
-
-        //        if (!File.Exists(filePath))
-        //        {
-        //            StatusTextFileServers.Text = "File not found.";
-        //            return;
-        //        }
-
-        //        var xml = XDocument.Load(filePath, LoadOptions.PreserveWhitespace);
-        //        var newServer = FileServersCombo.Text?.Trim() ?? "";
-        //        var old = string.Empty;
-        //        var updated = string.Empty;
-
-        //        switch (_alias.Alias_Enum)
-        //        {
-        //            case AliasEnum.SdmAppWebConfig:
-        //            case AliasEnum.SdmAppPubSubWebConfig:
-        //            case AliasEnum.STSWebConfig:
-        //                {
-        //                    var conns = xml.Descendants().Where(x =>
-        //                        string.Equals(x.Name.LocalName, "add", StringComparison.OrdinalIgnoreCase) &&
-        //                        (x.Attribute("connectionString") != null)).Select(x => x);
-
-        //                    foreach (var item in conns)
-        //                    {
-        //                        var name = item.Attribute("name")?.Value ?? "(unnamed)";
-        //                        if (ignoreKeyList(name))
-        //                            continue;
-
-        //                        old = (string)item.Attribute("connectionString") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, string.Empty);
-        //                        item.SetAttributeValue("connectionString", updated);
-        //                    }
-
-        //                    //SESSION STATE (DBSECURITY)
-        //                    var addCustom = xml.Descendants().FirstOrDefault(x => string.Equals(x.Name.LocalName, "sessionState", StringComparison.OrdinalIgnoreCase) &&
-        //                                             x.Attributes().Any(a => string.Equals(a.Name.LocalName, "mode", StringComparison.OrdinalIgnoreCase)) &&
-        //                                             x.Parent != null && string.Equals(x.Parent.Name.LocalName, "system.web", StringComparison.OrdinalIgnoreCase));
-
-        //                    if (addCustom != null)
-        //                    {
-        //                        old = (string)addCustom.Attribute("sqlConnectionString") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, string.Empty);
-        //                        addCustom.SetAttributeValue("sqlConnectionString", updated);
-        //                    }
-
-        //                    break;
-        //                }
-
-        //            case AliasEnum.SdmAppBOMi2WebConfig:
-        //            case AliasEnum.SdmAppPubSubBOMi2WebConfig:
-        //                {
-        //                    //ASMX/BOMI2
-        //                    var addCustom2 = xml.Descendants().FirstOrDefault(x => string.Equals(x.Name.LocalName, "add", StringComparison.OrdinalIgnoreCase) &&
-        //                                             x.Attributes().Any(a => string.Equals(a.Name.LocalName, "key", StringComparison.OrdinalIgnoreCase)) &&
-        //                                             x.Attribute("key").Value.Equals("DH2SQLServer"));
-
-        //                    old = (string)addCustom2.Attribute("value") ?? "";
-        //                    updated = UpdateConnectionString(old, newServer, string.Empty);
-        //                    addCustom2.SetAttributeValue("value", updated);
-
-        //                    break;
-        //                }
-        //            case AliasEnum.SdmAppMonitoringConfiguration:
-        //                {
-        //                    //PERFORMANCE - PROFILING (MonitoringConfiguration.xml)
-        //                    var addCustom3 = xml.Descendants().Where(x => string.Equals(x.Name.LocalName, "ProfileConsumer", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            (a.Value.Equals("HttpRequestConsumer") || a.Value.Equals("HtmlCachingConsumer") || a.Value.Equals("MemberAccessConsumer"))));
-
-        //                    foreach (var add in addCustom3)
-        //                    {
-
-        //                        var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "Setting", StringComparison.OrdinalIgnoreCase) &&
-        //                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) && a.Value.Equals("ConnectionString"))).FirstOrDefault();
-
-        //                        old = (string)descendant.Attribute("value") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, string.Empty);
-        //                        descendant.SetAttributeValue("value", updated);
-        //                    }
-
-        //                    break;
-        //                }
-        //            case AliasEnum.SdmLog4Net:
-        //                {
-        //                    //LOG4NET
-        //                    var addsCustom4 = xml.Descendants("log4net").Where(x => string.Equals(x.Name.LocalName, "log4net", StringComparison.OrdinalIgnoreCase)).Descendants("appender")
-        //                                        .Where(x => x.Attributes().Any(a => a.Name.LocalName.Equals("name") && a.Value.Equals("ErrorHandlerModule_SQLAppender")));
-
-        //                    //LOG4NET
-        //                    foreach (var add in addsCustom4)
-        //                    {
-        //                        var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "connectionString", StringComparison.OrdinalIgnoreCase) &&
-        //                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "value", StringComparison.OrdinalIgnoreCase))).FirstOrDefault();
-
-        //                        old = (string)descendant.Attribute("value") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, string.Empty);
-        //                        descendant.SetAttributeValue("value", updated);
-        //                    }
-
-        //                    break;
-        //                }
-        //        }
-
-        //        xml.Save(filePath, SaveOptions.DisableFormatting);
-
-        //        StatusTextFileServers.Text = "Saved!";
-        //        await Task.Delay(3000);
-        //        StatusTextFileServers.Text = string.Empty;
-        //        LoadAliases();
-        //        RefreshUI(_alias.Environment, false);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        StatusTextFileServers.Text = "Error: " + ex.Message;
-        //    }
-        //}
-
-        //private async void updateServersByFile(AliasItem _alias)
-        //{
-        //    try
-        //    {
-        //        var filePath = _alias.GetPath();
-
-        //        if (!File.Exists(filePath))
-        //        {
-        //            StatusTextFileServers.Text = "File not found.";
-        //            return;
-        //        }
-
-        //        var text = File.ReadAllText(filePath);
-        //        var newServer = FileServersCombo.Text?.Trim() ?? "";
-
-        //        // Helper to replace attribute values without touching whitespace
-        //        string ReplaceAttribute(string xml, string elementName, string attributeName, Func<string, bool> filter, Func<string, string> updater)
-        //        {
-        //            return Regex.Replace(
-        //                xml,
-        //                $@"(<{elementName}\b[^>]*?\s{attributeName}\s*=\s*"")(.*?)("")",
-        //                match =>
-        //                {
-        //                    var full = match.Value;
-        //                    var nameMatch = Regex.Match(full, @"\bname\s*=\s*""([^""]*)""");
-        //                    var name = nameMatch.Success ? nameMatch.Groups[1].Value : "(unnamed)";
-
-        //                    if (!filter(name))
-        //                        return match.Value;
-
-        //                    var oldValue = match.Groups[2].Value;
-        //                    var newValue = updater(oldValue);
-
-        //                    return match.Groups[1].Value + newValue + match.Groups[3].Value;
-        //                },
-        //                RegexOptions.IgnoreCase | RegexOptions.Singleline
-        //            );
-        //        }
-
-        //        switch (_alias.Alias_Enum)
-        //        {
-        //            case AliasEnum.SdmAppWebConfig:
-        //            case AliasEnum.SdmAppPubSubWebConfig:
-        //            case AliasEnum.STSWebConfig:
-        //                text = ReplaceAttribute(
-        //                    text,
-        //                    "add",
-        //                    "connectionString",
-        //                    name => !ignoreKeyList(name),
-        //                    old => UpdateConnectionString(old, newServer, string.Empty)
-        //                );
-
-        //                text = Regex.Replace(
-        //                    text,
-        //                    @"(<sessionState\b[^>]*?\ssqlConnectionString\s*=\s*"")(.*?)("")",
-        //                    m => m.Groups[1].Value +
-        //                         UpdateConnectionString(m.Groups[2].Value, newServer, string.Empty) +
-        //                         m.Groups[3].Value,
-        //                    RegexOptions.IgnoreCase
-        //                );
-        //                break;
-
-        //            case AliasEnum.SdmAppBOMi2WebConfig:
-        //            case AliasEnum.SdmAppPubSubBOMi2WebConfig:
-        //                text = Regex.Replace(
-        //                    text,
-        //                    @"(<add\b[^>]*?\bkey\s*=\s*""DH2SQLServer""[^>]*?\bvalue\s*=\s*"")(.*?)("")",
-        //                    m => m.Groups[1].Value +
-        //                         UpdateConnectionString(m.Groups[2].Value, newServer, string.Empty) +
-        //                         m.Groups[3].Value,
-        //                    RegexOptions.IgnoreCase
-        //                );
-        //                break;
-
-        //            case AliasEnum.SdmAppMonitoringConfiguration:
-        //                text = Regex.Replace(
-        //                    text,
-        //                    @"(<Setting\b[^>]*?\bname\s*=\s*""ConnectionString""[^>]*?\bvalue\s*=\s*"")(.*?)("")",
-        //                    m => m.Groups[1].Value +
-        //                         UpdateConnectionString(m.Groups[2].Value, newServer, string.Empty) +
-        //                         m.Groups[3].Value,
-        //                    RegexOptions.IgnoreCase
-        //                );
-        //                break;
-
-        //            case AliasEnum.SdmLog4Net:
-        //                text = Regex.Replace(
-        //                    text,
-        //                    @"(<connectionString\b[^>]*?\bvalue\s*=\s*"")(.*?)("")",
-        //                    m => m.Groups[1].Value +
-        //                         UpdateConnectionString(m.Groups[2].Value, newServer, string.Empty) +
-        //                         m.Groups[3].Value,
-        //                    RegexOptions.IgnoreCase
-        //                );
-        //                break;
-        //        }
-
-        //        File.WriteAllText(filePath, text);
-
-        //        StatusTextFileServers.Text = "Saved!";
-        //        await Task.Delay(3000);
-        //        StatusTextFileServers.Text = string.Empty;
-        //        LoadAliases();
-        //        RefreshUI(_alias.Environment, false);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        StatusTextFileServers.Text = "Error: " + ex.Message;
-        //    }
-        //}
-
         private async void updateServersByFile(AliasItem _alias)
         {
             try
             {
-                var filePath = _alias.GetPath();
+                var filePath = GetEnvironmentName(currentAlias);
 
                 if (!File.Exists(filePath))
                 {
@@ -952,8 +664,8 @@ namespace ConfigStringManager
                 await Task.Delay(3000);
                 StatusTextFileServers.Text = string.Empty;
 
-                LoadAliases();
-                RefreshUI(_alias.Environment, false);
+                //LoadAliases();
+                RefreshUI(_alias.EnvironmentName, false);
             }
             catch (Exception ex)
             {
@@ -971,16 +683,37 @@ namespace ConfigStringManager
             return servers.FirstOrDefault(s => string.Equals(s.Address, address, StringComparison.OrdinalIgnoreCase));
         }
 
-        private async void PopulateDatabasesAsync(string serverAddress, string fileDb)
+        private async Task PopulateDatabasesAsync(string serverAddress, string fileDb, CancellationToken token)
         {
-            //DatabaseCombo.ItemsSource = null;
-            var dbs = new List<string>();
-            serverAddress = serverAddress.TrimStart('\'').TrimEnd('\'');
-            fileDb = fileDb.TrimStart('\'').TrimEnd('\'');
+            DbLoadingPanel.Visibility = Visibility.Visible;
+            DatabaseCombo.IsEnabled = false;
+            await DoEventsAsync();
 
-            if (!string.IsNullOrWhiteSpace(serverAddress))
+            var dbs = new List<string>();
+            serverAddress = serverAddress.Trim('\'', ' ');
+            fileDb = fileDb.Trim('\'', ' ');
+
+            bool serverOk = false;
+
+            // 🔥 1. Check cache first
+            if (!string.IsNullOrWhiteSpace(serverAddress) &&
+                _databaseCache.TryGetValue(serverAddress, out var cachedList))
             {
+                if (cachedList != null)
+                { 
+                    // Cached successful result
+                    dbs = new List<string>(cachedList); 
+                    serverOk = true; 
+                } else 
+                { // Cached failure → skip SQL entirely
+                        serverOk = false; 
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(serverAddress))
+            {
+                // 🔥 2. No cache → try to load from SQL Server
                 var entry = FindServerEntry(serverAddress);
+
                 try
                 {
                     var builder = new SqlConnectionStringBuilder
@@ -988,57 +721,76 @@ namespace ConfigStringManager
                         DataSource = serverAddress,
                         InitialCatalog = "master",
                         ConnectTimeout = 3,
-                        TrustServerCertificate = true
+                        TrustServerCertificate = true,
+                        IntegratedSecurity = entry == null
                     };
 
-                    if (entry != null && entry.UseSqlAuth)
-                    {
-                        builder.UserID = entry.Username;
-                        builder.Password = entry.Password;
-                        builder.IntegratedSecurity = false;
-                    }
-                    else
-                    {
-                        builder.IntegratedSecurity = true;
-                    }
-
                     using var conn = new SqlConnection(builder.ConnectionString);
-                    await conn.OpenAsync();
+                    await conn.OpenAsync(token);
 
                     using var cmd = new SqlCommand("SELECT name FROM sys.databases ORDER BY name", conn);
-                    using var rdr = await cmd.ExecuteReaderAsync();
-                    while (await rdr.ReadAsync())
+                    using var rdr = await cmd.ExecuteReaderAsync(token);
+
+                    while (await rdr.ReadAsync(token))
                         dbs.Add(rdr.GetString(0));
+
+                    // Cache successful result
+                    _databaseCache[serverAddress] = new List<string>(dbs);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console.WriteLine("DB list load failed: " + ex.Message);
+                    // 🔥 Cache failure so we don't retry again
+                    _databaseCache[serverAddress] = null;
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(fileDb) && !dbs.Any(d => string.Equals(d, fileDb, StringComparison.OrdinalIgnoreCase)))
-                dbs.Insert(0, fileDb);
-
-            Dispatcher.Invoke(() =>
+            // 🔥 4. ALWAYS insert fileDb
+            if (!string.IsNullOrWhiteSpace(fileDb) &&
+                !dbs.Any(d => d.Equals(fileDb, StringComparison.OrdinalIgnoreCase)))
             {
-                DatabaseCombo.ItemsSource = null;
-                DatabaseCombo.ItemsSource = dbs;
-                if (!string.IsNullOrWhiteSpace(fileDb) && dbs.Any(x => x.ToLower().Equals(fileDb.ToLower())))
-                {
-                    var _item = dbs.Where(x => x.ToLower().Equals(fileDb.ToLower())).FirstOrDefault();
-                    DatabaseCombo.SelectedItem = _item;
-                }
+                dbs.Insert(0, fileDb);
+            }
 
-                clearMessages();
+            // 🔥 5. If server unreachable AND no fileDb → placeholder
+            if (dbs.Count == 0)
+                dbs.Add("(loading...)");
+                //dbs.Add("(unknown)");
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                DatabaseCombo.ItemsSource = dbs;
+
+                if (!string.IsNullOrWhiteSpace(fileDb))
+                {
+                    DatabaseCombo.SelectedItem = dbs
+                        .FirstOrDefault(x => x.Equals(fileDb, StringComparison.OrdinalIgnoreCase))
+                        ?? fileDb;
+                }
+                else
+                {
+                    DatabaseCombo.SelectedIndex = 0;
+                }
             });
+
+            DbLoadingPanel.Visibility = Visibility.Collapsed;
+            DatabaseCombo.IsEnabled = true;
         }
 
 
-        private void ServerCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void ServerCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_suppressServerComboEvent)
+                return;
+
+            // Cancel any previous DB load
+            _dbLoadCts?.Cancel();
+            _dbLoadCts = new CancellationTokenSource();
+            var token = _dbLoadCts.Token;
+
             var server = ServerCombo.SelectedItem as string ?? ServerCombo.Text;
             var currentDb = DatabaseCombo.Text;
-            PopulateDatabasesAsync(server, currentDb);
+
+            await PopulateDatabasesAsync(server, currentDb, token);
         }
 
         private void DatabaseCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1048,221 +800,39 @@ namespace ConfigStringManager
 
         #endregion
 
-        #region Test connection
+        private void BtnReloadFiles_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                StatusText.Text = "Reloading files...";
+                StatusTextFileServers.Text = "";
 
-        //private async void BtnTestConnection_Click(object sender, RoutedEventArgs e)
-        //{
-        //    ServerTestResult.Text = "";
-        //    if (ServersListBox.SelectedItem == null) { ServerTestResult.Text = "Select a server to test connection."; return; }
-        //    dynamic sel = ServersListBox.SelectedItem;
-        //    var entry = sel.Entry as ServerEntry;
-        //    if (entry == null) { ServerTestResult.Text = "Invalid selection."; return; }
+                // Clear UI panels
+                AliasPanel.Visibility = Visibility.Collapsed;
+                ConnStringsPanel.Visibility = Visibility.Collapsed;
+                DatabaseCombo.ItemsSource = null;
+                ServerCombo.ItemsSource = null;
 
-        //    ServerTestResult.Text = "Testing...";
-        //    var ok = await TestSqlConnectionAsync(entry);
-        //    ServerTestResult.Text = ok ? "✅ Connection successful." : "❌ Connection failed (see console).";
-        //    ServerTestResult.Foreground = ok ? System.Windows.Media.Brushes.Green : System.Windows.Media.Brushes.Red;
-        //}
+                // Clear current selections
+                currentAlias = null;
+                currentConn = (null, null);
 
-        //private Task<bool> TestSqlConnectionAsync(ServerEntry entry)
-        //{
-        //    return Task.Run(() =>
-        //    {
-        //        try
-        //        {
-        //            var builder = new SqlConnectionStringBuilder
-        //            {
-        //                DataSource = entry.Address,
-        //                InitialCatalog = "master",
-        //                ConnectTimeout = 3,
-        //                TrustServerCertificate = true
-        //            };
+                // Reload everything
+                LoadAliases();
 
-        //            if (entry.UseSqlAuth)
-        //            {
-        //                builder.UserID = entry.Username;
-        //                builder.Password = entry.Password;
-        //                builder.IntegratedSecurity = false;
-        //            }
-        //            else
-        //            {
-        //                builder.IntegratedSecurity = true;
-        //            }
+                // Refresh UI (your existing method)
+                RefreshUI(null, true);
 
-        //            using var conn = new SqlConnection(builder.ConnectionString);
-        //            conn.Open();
-        //            conn.Close();
-        //            return true;
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Console.WriteLine("TestConn failed: " + ex.Message);
-        //            return false;
-        //        }
-        //    });
-        //}
-
-        #endregion
+                StatusText.Text = "Files reloaded.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Error reloading files: " + ex.Message;
+            }
+        }
 
         #region Save connection
 
-        //private void BtnSaveConn_Click(object sender, RoutedEventArgs e)
-        //{
-        //    if (currentConn.name == null || currentConn.element == null || currentAlias == null)
-        //    {
-        //        StatusText.Text = "No connection selected.";
-        //        return;
-        //    }
-
-        //    try
-        //    {
-        //        var filePath = currentAlias.GetPath();
-        //        if (!File.Exists(filePath))
-        //        {
-        //            StatusText.Text = "File not found.";
-        //            return;
-        //        }
-
-        //        var xml = XDocument.Load(filePath, LoadOptions.PreserveWhitespace);
-        //        var old = "";
-        //        var newServer = ServerCombo.Text?.Trim() ?? "";
-        //        var newDb = DatabaseCombo.Text?.Trim() ?? "";
-        //        var updated = "";
-
-        //        switch (currentAlias.Alias_Enum)
-        //        {
-        //            case AliasEnum.SdmAppWebConfig:
-        //            case AliasEnum.SdmAppPubSubWebConfig:
-        //            case AliasEnum.STSWebConfig:
-        //                {
-        //                    var add = xml.Descendants().FirstOrDefault(x =>
-        //                        string.Equals(x.Name.LocalName, "add", StringComparison.OrdinalIgnoreCase) &&
-        //                        string.Equals((string)x.Attribute("name") ?? "", currentConn.name, StringComparison.OrdinalIgnoreCase) &&
-        //                        (x.Attribute("connectionString") != null));
-
-        //                    //SESSION STATE (DBSECURITY)
-        //                    var addCustom = xml.Descendants().FirstOrDefault(x => string.Equals(x.Name.LocalName, "sessionState", StringComparison.OrdinalIgnoreCase) &&
-        //                                                           string.Equals((string)x.Attribute("mode") ?? "", currentConn.name, StringComparison.OrdinalIgnoreCase) &&
-        //                                                           x.Parent != null && string.Equals(x.Parent.Name.LocalName, "system.web", StringComparison.OrdinalIgnoreCase));
-
-        //                    if (add == null && addCustom == null)
-        //                    {
-        //                        StatusText.Text = "Connection entry not found in file.";
-        //                        return;
-        //                    }
-
-        //                    if (add != null)
-        //                    {
-        //                        old = (string)add.Attribute("connectionString") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, newDb);
-        //                        add.SetAttributeValue("connectionString", updated);
-        //                    }
-
-        //                    //SESSION STATE (DBSECURITY)
-        //                    if (addCustom != null)
-        //                    {
-        //                        old = (string)addCustom.Attribute("sqlConnectionString") ?? "";
-        //                        updated = UpdateConnectionString(old, newServer, newDb);
-        //                        addCustom.SetAttributeValue("sqlConnectionString", updated);
-        //                    }
-
-        //                    break;
-        //                }
-
-        //            case AliasEnum.SdmAppBOMi2WebConfig:
-        //            case AliasEnum.SdmAppPubSubBOMi2WebConfig:
-        //                {
-        //                    //ASMX/BOMI2
-        //                    var addCustom2 = xml.Descendants().FirstOrDefault(x => string.Equals(x.Name.LocalName, "add", StringComparison.OrdinalIgnoreCase) &&
-        //                                                          x.Attributes().Any(a => string.Equals(a.Name.LocalName, "key", StringComparison.OrdinalIgnoreCase)) &&
-        //                                                          x.Attribute("key").Value.Equals(currentConn.name));
-
-        //                    if (addCustom2 == null)
-        //                    {
-        //                        StatusText.Text = "Connection entry not found in file.";
-        //                        return;
-        //                    }
-
-        //                    old = (string)addCustom2.Attribute("value") ?? "";
-        //                    updated = UpdateConnectionString(old, newServer, newDb);
-        //                    addCustom2.SetAttributeValue("value", updated);
-
-        //                    break;
-        //                }
-        //            case AliasEnum.SdmAppMonitoringConfiguration:
-        //                {
-        //                    //PERFORMANCE - PROFILING (MonitoringConfiguration.xml)
-        //                    IEnumerable<XElement> addCustom3 = null;
-
-        //                    if (currentConn.element.Parent.Parent.Attributes().Any(a => string.Equals(a.Name.LocalName, "name") && a.Value.Equals("HttpRequestConsumer")))
-        //                    {
-        //                        addCustom3 = xml.Descendants().Where(x => string.Equals(x.Name.LocalName, "ProfileConsumer", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            a.Value.Equals("HttpRequestConsumer")));
-        //                    }
-        //                    else if (currentConn.element.Parent.Parent.Attributes().Any(a => string.Equals(a.Name.LocalName, "name") && a.Value.Equals("HtmlCachingConsumer")))
-        //                    {
-        //                        addCustom3 = xml.Descendants().Where(x => string.Equals(x.Name.LocalName, "ProfileConsumer", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) &&
-        //                                                            a.Value.Equals("HtmlCachingConsumer")));
-        //                    }
-        //                    else if (currentConn.element.Parent.Parent.Attributes().Any(a => string.Equals(a.Name.LocalName, "name") && a.Value.Equals("MemberAccessConsumer")))
-        //                    {
-        //                        addCustom3 = xml.Descendants().Where(x => string.Equals(x.Name.LocalName, "ProfileConsumer", StringComparison.OrdinalIgnoreCase) &&
-        //                                                             x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) &&
-        //                                                             a.Value.Equals("MemberAccessConsumer")));
-        //                    }
-
-        //                    if (addCustom3 == null)
-        //                    {
-        //                        StatusText.Text = "Connection entry not found in file.";
-        //                        return;
-        //                    }
-
-        //                    var descendant = addCustom3.Descendants().Where(x => string.Equals(x.Name.LocalName, "Setting", StringComparison.OrdinalIgnoreCase) &&
-        //                                            x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) && a.Value.Equals("ConnectionString"))).FirstOrDefault();
-
-        //                    old = (string)descendant.Attribute("value") ?? "";
-        //                    updated = UpdateConnectionString(old, newServer, newDb);
-        //                    descendant.SetAttributeValue("value", updated);
-
-        //                    break;
-        //                }
-        //            case AliasEnum.SdmLog4Net:
-        //                {
-        //                    //LOG4NET
-        //                    var addCustom4 = xml.Descendants("log4net").Where(x => string.Equals(x.Name.LocalName, "log4net", StringComparison.OrdinalIgnoreCase)).Descendants("appender")
-        //                                        .FirstOrDefault(x => x.Attributes().Any(a => a.Name.LocalName.Equals("name") && a.Value.Equals("ErrorHandlerModule_SQLAppender")));
-
-        //                    if (addCustom4 == null)
-        //                    {
-        //                        StatusText.Text = "Connection entry not found in file.";
-        //                        return;
-        //                    }
-
-        //                    //LOG4NET
-        //                    var descendant = addCustom4.Descendants().Where(x => string.Equals(x.Name.LocalName, "connectionString", StringComparison.OrdinalIgnoreCase) &&
-        //                                        x.Attributes().Any(a => string.Equals(a.Name.LocalName, "value", StringComparison.OrdinalIgnoreCase))).FirstOrDefault();
-
-        //                    old = (string)descendant.Attribute("value") ?? "";
-        //                    updated = UpdateConnectionString(old, newServer, newDb);
-        //                    descendant.SetAttributeValue("value", updated);
-
-        //                    break;
-        //                }
-        //        }
-
-        //        xml.Save(filePath, SaveOptions.DisableFormatting);
-
-        //        StatusText.Text = "Saved.";
-        //        LoadAliases();
-        //        RefreshUI(currentAlias.Environment, false);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        StatusText.Text = "Error: " + ex.Message;
-        //    }
-        //}
         private void BtnSaveConn_Click(object sender, RoutedEventArgs e)
         {
             if (currentConn.name == null || currentConn.element == null || currentAlias == null)
@@ -1273,7 +843,7 @@ namespace ConfigStringManager
 
             try
             {
-                var filePath = currentAlias.GetPath();
+                var filePath = GetEnvironmentName(currentAlias);
                 if (!File.Exists(filePath))
                 {
                     StatusText.Text = "File not found.";
@@ -1349,8 +919,6 @@ namespace ConfigStringManager
                             break;
                         }
 
-
-
                     case AliasEnum.SdmLog4Net:
                         // <connectionString value="..."> inside <appender name="ErrorHandlerModule_SQLAppender">
                         text = UpdateElementAttribute(
@@ -1366,8 +934,8 @@ namespace ConfigStringManager
                 File.WriteAllText(filePath, text);
 
                 StatusText.Text = "Saved.";
-                LoadAliases();
-                RefreshUI(currentAlias.Environment, false);
+                //LoadAliases();
+                RefreshUI(GetEnvironmentName(currentAlias), false);
             }
             catch (Exception ex)
             {
@@ -1429,6 +997,37 @@ namespace ConfigStringManager
         #endregion
 
         #region Helpers
+
+        private string GetServersFilePath()
+        {
+            if (!Directory.Exists(appFolder))
+                Directory.CreateDirectory(appFolder);
+
+            return Path.Combine(appFolder, "servers.json");
+        }
+
+        private static List<ServerEntry> GetDefaultServers()
+        {
+            return new List<ServerEntry>
+            {
+                new ServerEntry { Name = "Server1", Address = "someinstance\\server1" },
+                new ServerEntry { Name = "Server2", Address = "someinstance\\server2" },
+                new ServerEntry { Name = "Server3", Address = "someinstance\\server3" }
+            };
+        }
+        
+        private DevEnvironment GetEnvironment(string name)
+        {
+            var devEnv = DevEnvs.FirstOrDefault(e => e.Name == name);
+            if (devEnv == null)
+                return new DevEnvironment();
+            return devEnv;
+        }
+
+        private string GetEnvironmentName(AliasItem alias)
+        {
+            return alias.GetPath(GetEnvironment(alias.EnvironmentName));
+        }
 
         private static string ParseConn(string connString, string[] keys)
         {

@@ -1,21 +1,19 @@
 ﻿WPF Project
 
-Fix Layout and colors
-Throw exceptions
-Add buttons to change all the files (maybe a selectable option to select individual files)
-
-
 ConfigStringManager:
 
-It doesn't use XDocument because everytime we save a file it "normalizes" it removing "insignificant whitespaces", generating more changes to the config files than desired, so the solution was to work with plain text and regex expressions.
+	NOTE: It doesn't use XDocument to manage config files because everytime we save a file it "normalizes" it removing "insignificant whitespaces", generating more changes to the config files than desired, 
+so the solution was to work with plain text and regex expressions.
 
 KNOWN ISSUES:
 	
-	If the file changes while the ConfigStringManager is open, it doesn't update the files. Add a RELOAD button to update the files content.
-	Async issue, when selecting a connection string it takes time to load, sometimes you have to select a different connection string and then come back (usually the second selection works). Fix it.
+	databases not being loaded sometimes.
+
+	THROW AN EXCEPTION/MESSAGE IF THE SERVER WASN'T FOUND/ ABLE TO ACCESS
 		
 IMPROVEMENTS TO DO:
 
+	Make it responsive (adapts to screen size and resizing action)
 	REPLACE dbBommain DATABASE STRING ACROSS ALL FILES
 	Allow user to update database value across a file/environment (similar to what is being done for updating server value for a whole environment/file. e.g.: Update all databases named "dbbommain")
 	
