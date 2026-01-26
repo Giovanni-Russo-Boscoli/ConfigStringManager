@@ -80,6 +80,42 @@
         <Style x:Key="MsgStyle" TargetType="TreeViewItem" BasedOn="{StaticResource GlobalTreeItemStyle}">
         </Style>
 
+        <Style TargetType="ComboBox" x:Key="EditableComboFix">
+            <Setter Property="IsEditable" Value="True"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Name="ToggleButton"
+                                  Grid.Column="2"
+                                  Focusable="False"
+                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                  ClickMode="Press">
+                                <Path Fill="Black" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                            </ToggleButton>
+
+                            <ContentPresenter Name="ContentSite"
+                                      IsHitTestVisible="False"
+                                      Content="{TemplateBinding SelectionBoxItem}"
+                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                      ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                      Margin="3,3,23,3"
+                                      VerticalAlignment="Center"/>
+
+                            <TextBox Name="PART_EditableTextBox"
+                             Margin="3,3,23,3"
+                             VerticalContentAlignment="Center"
+                             MinHeight="24"
+                             Background="Transparent"
+                             Visibility="Hidden"
+                             IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Style selector -->
         <local:TreeViewStyleSelector x:Key="TreeViewSelector"
                                  EnvStyle="{StaticResource EnvStyle}"
@@ -92,6 +128,7 @@
 
     <Grid Background="{StaticResource WindowBackgroundBrush}" Margin="12,12,10,12">
 
+       
         <!-- LEFT: Files Tree -->
         <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,530,0">
             <DockPanel>
@@ -104,10 +141,11 @@
                       Height="600"
                       Margin="5"
                       ItemsSource="{Binding DevEnvs}"
-                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
                       ItemContainerStyleSelector="{StaticResource TreeViewSelector}">
-                    
+                        <!--ScrollViewer.HorizontalScrollBarVisibility="Disabled"-->
+                        
                         <TreeView.Resources>
 
                             <!--<Style TargetType="TreeViewItem">
@@ -191,6 +229,17 @@
                 </TransformGroup>
             </Border.RenderTransform>
             <StackPanel>
+               
+                <!--Message Panel-->
+                <StackPanel x:Name="StatusMessagePanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
+                    <TextBlock x:Name="StatusMessage" Text="" Foreground="DarkOrange" FontWeight="Bold"/>
+                </StackPanel>
+
+                <StackPanel x:Name="DbLoadingPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
+                    <ProgressBar IsIndeterminate="True" Width="120" Height="12" Margin="0,0,10,0"/>
+                    <TextBlock Text="Loading databases..." VerticalAlignment="Center" Foreground="DarkOrange"/>
+                </StackPanel>
+
                 <TextBlock Text="Edit Selected" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
                 <StackPanel x:Name="AliasPanel" Visibility="Collapsed">
@@ -221,19 +270,17 @@
                         <Button x:Name="btnUpdateFileServers" Click="BtnUpdateServersOnFile_Click" Content="Update" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6" Margin="0"/>
 
                     </StackPanel>
-                    <StackPanel>
+                    <!--<StackPanel x:Name="StatusTextFileServersPanel">
                         <TextBlock x:Name="StatusTextFileServers" Foreground="DarkRed" FontWeight="Bold" Margin="10,6,0,0"/>
-                    </StackPanel>
+                    </StackPanel>-->
 
                 </StackPanel>
 
                 <Separator Margin="0,4,0,8"/>
 
                 <StackPanel x:Name="ConnStringsPanel" Visibility="Collapsed">
-                    <StackPanel x:Name="DbLoadingPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
-                        <ProgressBar IsIndeterminate="True" Width="120" Height="12" Margin="0,0,10,0"/>
-                        <TextBlock Text="Loading databases..." VerticalAlignment="Center" Foreground="DarkOrange"/>
-                    </StackPanel>
+                   
+                  
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
 
                         <StackPanel Width="70">
@@ -253,13 +300,16 @@
                         <StackPanel Width="70">
                             <TextBlock Text="Database" Foreground="{StaticResource MutedBrush}"/>
                         </StackPanel>
-                        <ComboBox x:Name="DatabaseCombo" MinWidth="300" IsEditable="True" SelectionChanged="DatabaseCombo_SelectionChanged"/>
+                        <ComboBox x:Name="DatabaseCombo" MinWidth="300" MinHeight="28" IsEditable="true" IsTextSearchEnabled="True"  MaxDropDownHeight="Auto" 
+                                  SelectionChanged="DatabaseCombo_SelectionChanged"></ComboBox>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="btnSaveChanges"  Content="Save Changes" Click="BtnSaveConn_Click" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6"/>
-                        <TextBlock x:Name="StatusText" Foreground="darkred" FontWeight="Bold" Margin="10,6,0,0"/>
+                        <!--<TextBlock x:Name="StatusText" Foreground="darkred" FontWeight="Bold" Margin="10,6,0,0"/>-->
                     </StackPanel>
+                  
+
                 </StackPanel>
             </StackPanel>
         </Border>

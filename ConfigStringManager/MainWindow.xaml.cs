@@ -9,6 +9,10 @@ using System.Xml.Linq;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 using Brushes = System.Windows.Media.Brush;
+using System.Text;
+using System.Net;
+using System.Windows.Threading;
+using System.Windows.Forms;
 
 namespace ConfigStringManager
 {
@@ -18,12 +22,12 @@ namespace ConfigStringManager
         private readonly string appFolder;
         private readonly string aliasesPath;
         private readonly string envFileName = "bomiEnvironments.json";
-
+        
         public ObservableCollection<DevEnvironment> DevEnvs { get; } = new();
 
         private List<ServerEntry> servers = new();
-        private static readonly HashSet<string> ignoreKeys = new(StringComparer.OrdinalIgnoreCase) 
-        { 
+        private static readonly HashSet<string> ignoreKeys = new(StringComparer.OrdinalIgnoreCase)
+        {
             "DH2CRSCodesServer", // from STS.Web.config
             "PerformanceEntities" // from Sdm.App.PubSub.Web.config & Sdm.App.Web.config
         };
@@ -34,7 +38,8 @@ namespace ConfigStringManager
 
         private CancellationTokenSource _dbLoadCts;
         private bool _suppressServerComboEvent = false;
-        
+        //private readonly DispatcherTimer _statusTimer;
+
         private readonly Dictionary<string, List<string>> _databaseCache = new(StringComparer.OrdinalIgnoreCase);
 
         public MainWindow()
@@ -45,14 +50,16 @@ namespace ConfigStringManager
             Directory.CreateDirectory(appFolder);
             aliasesPath = Path.Combine(appFolder, envFileName);
 
+            //_statusTimer = new DispatcherTimer(); _statusTimer.Tick += (s, e) => { StatusMessage.Visibility = Visibility.Collapsed; _statusTimer.Stop(); };
+
             servers = LoadServers();
 
-            LoadAliases(); 
+            LoadAliases();
 
             RefreshUI();
         }
 
-    private static Task DoEventsAsync()
+        private static Task DoEventsAsync()
         {
             return Application.Current.Dispatcher.InvokeAsync(() => { },
                 System.Windows.Threading.DispatcherPriority.Background).Task;
@@ -77,6 +84,14 @@ namespace ConfigStringManager
             {
                 string json = File.ReadAllText(filePath);
                 var servers = JsonSerializer.Deserialize<List<ServerEntry>>(json);
+                List<ServerEntry> _servers = new List<ServerEntry>();
+                //string strServers = "";
+                //foreach (var item in servers)
+                //{
+                //    strServers += $@"new ServerEntry {{ Name = ""{item.Name}"" , Address = ""{item.Address.Replace("\\", "##")}"" }},\n";
+                //    new ServerEntry { Name = "Server1", Address = "someinstance\\server1" },
+
+                //}
 
                 // If file is empty or invalid, recreate defaults
                 if (servers == null || servers.Count == 0)
@@ -150,7 +165,6 @@ namespace ConfigStringManager
             {
                 MessageBox.Show("Failed saving config list: " + ex.Message);
             }
-            RefreshUI();
         }
 
         #endregion
@@ -200,15 +214,16 @@ namespace ConfigStringManager
             currentConn = (null, null);
             ServerCombo.ItemsSource = null;
             DatabaseCombo.ItemsSource = null;
-            clearMessages();
+            //clearMessages();
             PanelConnEnabled(false);
         }
 
-        private void clearMessages()
-        {
-            StatusText.Text = "";
-            StatusTextFileServers.Text = "";
-        }
+        //private void clearMessages()
+        //{
+        //    //StatusMessage.Text = "";
+        //    //StatusText.Text = "";
+        //    //StatusTextFileServers.Text = "";
+        //}
 
         private void PanelConnEnabled(bool enabled)
         {
@@ -234,7 +249,7 @@ namespace ConfigStringManager
             {
                 alias.Children.Add(new MissingFileMessage
                 {
-                    Message = $"(File not found)\nCurrently reading from: {filePath}\nCheck file: {appFolder}\\{envFileName}"
+                    Message = $"(File not found)\nCurrently reading from: {filePath}\nCheck file: Desktop\\{userFolder}"
                 });
                 return;
             }
@@ -314,7 +329,7 @@ namespace ConfigStringManager
                 foreach (var add in addsCustom3)
                 {
                     var name = add.Attribute("name")?.Value ?? "(unnamed)";
-                    
+
                     var descendant = add.Descendants().Where(x => string.Equals(x.Name.LocalName, "Setting", StringComparison.OrdinalIgnoreCase) &&
                                         x.Attributes().Any(a => string.Equals(a.Name.LocalName, "name", StringComparison.OrdinalIgnoreCase) && a.Value.Equals("ConnectionString"))).FirstOrDefault();
 
@@ -367,6 +382,7 @@ namespace ConfigStringManager
             if (sender is not TreeViewItem env) return;
             if (env.DataContext is not DevEnvironment devEnv) return;
 
+            ClearStatusMessage();
             env.IsExpanded = true;
             currentAlias = null;
             currentDevEnv = devEnv;
@@ -382,7 +398,7 @@ namespace ConfigStringManager
             ConnStringsPanel.Visibility = Visibility.Collapsed;
 
             PopulateFileServersCombo();
-            clearMessages();
+            //clearMessages();
         }
 
         private void Root_Selected(object sender, RoutedEventArgs e)
@@ -392,6 +408,7 @@ namespace ConfigStringManager
             if (sender is not TreeViewItem root) return;
             if (root.DataContext is not AliasItem alias) return;
 
+            ClearStatusMessage();
             currentDevEnv = null;
             currentAlias = alias;
 
@@ -408,7 +425,7 @@ namespace ConfigStringManager
             ConnStringsPanel.Visibility = Visibility.Collapsed;
 
             PopulateFileServersCombo();
-            clearMessages();
+            //clearMessages();
         }
 
         private async void Conn_Selected(object sender, RoutedEventArgs e)
@@ -417,12 +434,16 @@ namespace ConfigStringManager
             if (sender is not TreeViewItem item) return;
             if (item.DataContext is not ConnectionEntry entry) return;
 
+            ClearStatusMessage();
+
+            AliasPanel.Visibility = Visibility.Collapsed;
+
             // Cancel any previous DB load
             _dbLoadCts?.Cancel();
             _dbLoadCts = new CancellationTokenSource();
             var token = _dbLoadCts.Token;
 
-            StatusTextFileServers.Text = string.Empty;
+            //StatusTextFileServers.Text = string.Empty;
             DatabaseCombo.ItemsSource = null;
 
             currentAlias = entry.Alias;
@@ -483,10 +504,10 @@ namespace ConfigStringManager
             await PopulateDatabasesAsync(parsedServer, parsedDb, token);
 
             PanelConnEnabled(true);
-            StatusText.Text = "";
+            //StatusText.Text = "";
             AliasPanel.Visibility = Visibility.Collapsed;
             ConnStringsPanel.Visibility = Visibility.Visible;
-            clearMessages();
+            //clearMessages();
         }
 
 
@@ -497,7 +518,8 @@ namespace ConfigStringManager
         private async void BtnCopyFilePath_Click(object sender, RoutedEventArgs e)
         {
             System.Windows.Clipboard.SetText(FilePathText.Text);
-            StatusTextFileServers.Text = "Copied!";
+            //StatusTextFileServers.Text = "Copied!";
+            ShowStatusAsync("Copied.", System.Windows.Media.Brushes.DarkRed);
         }
 
         private void RenderServerComboItems(string fileServer)
@@ -548,7 +570,8 @@ namespace ConfigStringManager
         {
             if ((currentAlias == null || AliasBox.Text.Equals(string.Empty)) && (currentDevEnv == null || AliasBox.Text.Equals(string.Empty)))
             {
-                StatusTextFileServers.Text = "No file/alias selected.";
+                //StatusTextFileServers.Text = "No file/alias selected.";
+                ShowStatusAsync("No file/alias selected.", System.Windows.Media.Brushes.DarkRed);
                 return;
             }
 
@@ -558,7 +581,8 @@ namespace ConfigStringManager
                 {
                     return;
                 }
-                updateServersByFile(currentAlias);
+                ClearStatusMessage();
+                updateServersByFile(currentAlias, true);
             }
 
             if (currentDevEnv != null && !string.IsNullOrEmpty(AliasBox.Text))
@@ -568,6 +592,7 @@ namespace ConfigStringManager
                     return;
                 }
 
+                ClearStatusMessage();
                 foreach (var item in currentDevEnv.Files)
                 {
                     updateServersByFile(item);
@@ -575,15 +600,16 @@ namespace ConfigStringManager
             }
         }
 
-        private async void updateServersByFile(AliasItem _alias)
+        private async void updateServersByFile(AliasItem _alias, bool showStatus = false)
         {
             try
             {
-                var filePath = GetEnvironmentName(currentAlias);
+                var filePath = GetEnvironmentName(_alias);
 
                 if (!File.Exists(filePath))
                 {
-                    StatusTextFileServers.Text = "File not found.";
+                    //StatusTextFileServers.Text = "File not found.";
+                    ShowStatusAsync("File not found.", System.Windows.Media.Brushes.DarkRed);
                     return;
                 }
 
@@ -660,16 +686,19 @@ namespace ConfigStringManager
 
                 File.WriteAllText(filePath, text);
 
-                StatusTextFileServers.Text = "Saved!";
-                await Task.Delay(3000);
-                StatusTextFileServers.Text = string.Empty;
+                //StatusTextFileServers.Text = "Saved!";
+                ////await Task.Delay(3000);
+                //StatusTextFileServers.Text = string.Empty;
+                //if(showStatus)
+                    ShowStatusAsync("Saved!", System.Windows.Media.Brushes.DarkRed);
 
                 //LoadAliases();
                 RefreshUI(_alias.EnvironmentName, false);
             }
             catch (Exception ex)
             {
-                StatusTextFileServers.Text = "Error: " + ex.Message;
+                //StatusTextFileServers.Text = "Error: " + ex.Message;
+                ShowStatusAsync(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkRed);
             }
         }
 
@@ -685,6 +714,9 @@ namespace ConfigStringManager
 
         private async Task PopulateDatabasesAsync(string serverAddress, string fileDb, CancellationToken token)
         {
+            StatusMessagePanel.Visibility = Visibility.Collapsed; //status should always hide when a database is selected, until it resolves.
+
+            ConnStringsPanel.Visibility = Visibility.Visible;
             DbLoadingPanel.Visibility = Visibility.Visible;
             DatabaseCombo.IsEnabled = false;
             await DoEventsAsync();
@@ -695,23 +727,24 @@ namespace ConfigStringManager
 
             bool serverOk = false;
 
-            // 🔥 1. Check cache first
+            // 1. Check cache first
             if (!string.IsNullOrWhiteSpace(serverAddress) &&
                 _databaseCache.TryGetValue(serverAddress, out var cachedList))
             {
                 if (cachedList != null)
-                { 
+                {
                     // Cached successful result
-                    dbs = new List<string>(cachedList); 
-                    serverOk = true; 
-                } else 
+                    dbs = new List<string>(cachedList);
+                    serverOk = true;
+                }
+                else
                 { // Cached failure → skip SQL entirely
-                        serverOk = false; 
+                    serverOk = false;
                 }
             }
             else if (!string.IsNullOrWhiteSpace(serverAddress))
             {
-                // 🔥 2. No cache → try to load from SQL Server
+                // 2. No cache → try to load from SQL Server
                 var entry = FindServerEntry(serverAddress);
 
                 try
@@ -722,7 +755,7 @@ namespace ConfigStringManager
                         InitialCatalog = "master",
                         ConnectTimeout = 3,
                         TrustServerCertificate = true,
-                        IntegratedSecurity = entry == null
+                        IntegratedSecurity = true //entry == null
                     };
 
                     using var conn = new SqlConnection(builder.ConnectionString);
@@ -739,22 +772,21 @@ namespace ConfigStringManager
                 }
                 catch
                 {
-                    // 🔥 Cache failure so we don't retry again
-                    _databaseCache[serverAddress] = null;
+                    // Cache failure so we don't retry again
+                    //_databaseCache[serverAddress] = null;
+
+                    // if server isn't available don't cache
+                    //await ShowStatusAsync("Server not accessible", 3);
                 }
             }
 
-            // 🔥 4. ALWAYS insert fileDb
+            // ALWAYS insert fileDb
             if (!string.IsNullOrWhiteSpace(fileDb) &&
                 !dbs.Any(d => d.Equals(fileDb, StringComparison.OrdinalIgnoreCase)))
             {
-                dbs.Insert(0, fileDb);
+                //dbs.Insert(0, fileDb);
+                DatabaseCombo.Text = fileDb; // user can still type over this DatabaseCombo.SelectedIndex = -1;
             }
-
-            // 🔥 5. If server unreachable AND no fileDb → placeholder
-            if (dbs.Count == 0)
-                dbs.Add("(loading...)");
-                //dbs.Add("(unknown)");
 
             await Dispatcher.InvokeAsync(() =>
             {
@@ -770,10 +802,24 @@ namespace ConfigStringManager
                 {
                     DatabaseCombo.SelectedIndex = 0;
                 }
-            });
+
+            });            
 
             DbLoadingPanel.Visibility = Visibility.Collapsed;
             DatabaseCombo.IsEnabled = true;
+
+            //recalculate the height based on its items
+            //DatabaseCombo.IsEditable = true;
+
+            if (!_databaseCache.TryGetValue(serverAddress, out var serverAccessible))
+            {
+                if (serverAccessible == null)
+                {
+                    ShowStatusAsync("Server not accessible", System.Windows.Media.Brushes.DarkOrange);
+                    //DatabaseCombo.IsEnabled = false;
+                    //DatabaseCombo.IsEditable = false;
+                }
+            }
         }
 
 
@@ -795,49 +841,51 @@ namespace ConfigStringManager
 
         private void DatabaseCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            clearMessages();
+            //clearMessages();
         }
 
         #endregion
 
-        private void BtnReloadFiles_Click(object sender, RoutedEventArgs e)
+        private async void BtnReloadFiles_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                StatusText.Text = "Reloading files...";
-                StatusTextFileServers.Text = "";
-
-                // Clear UI panels
-                AliasPanel.Visibility = Visibility.Collapsed;
-                ConnStringsPanel.Visibility = Visibility.Collapsed;
-                DatabaseCombo.ItemsSource = null;
-                ServerCombo.ItemsSource = null;
-
                 // Clear current selections
                 currentAlias = null;
                 currentConn = (null, null);
 
+                AliasPanel.Visibility = Visibility.Collapsed;
+                ConnStringsPanel.Visibility = Visibility.Collapsed;
+
+                // Clear UI panels
+                //DatabaseCombo.ItemsSource = null;
+                //ServerCombo.ItemsSource = null;
+
                 // Reload everything
                 LoadAliases();
+                RefreshUI("", false);
 
-                // Refresh UI (your existing method)
-                RefreshUI(null, true);
+                //StatusText.Text = "Reloading files...";
+                //StatusTextFileServers.Text = "";
 
-                StatusText.Text = "Files reloaded.";
+                //StatusText.Text = "Files reloaded.";
+                ShowStatusAsync("Files Reloaded", System.Windows.Media.Brushes.DarkRed);
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Error reloading files: " + ex.Message;
+                //StatusText.Text = "Error reloading files: " + ex.Message;
+                ShowStatusAsync(("Error reloading files: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
             }
         }
 
         #region Save connection
 
-        private void BtnSaveConn_Click(object sender, RoutedEventArgs e)
+        private async void BtnSaveConn_Click(object sender, RoutedEventArgs e)
         {
             if (currentConn.name == null || currentConn.element == null || currentAlias == null)
             {
-                StatusText.Text = "No connection selected.";
+                //StatusText.Text = "No connection selected.";
+                ShowStatusAsync("No connection selected.", System.Windows.Media.Brushes.DarkOrange);
                 return;
             }
 
@@ -846,10 +894,12 @@ namespace ConfigStringManager
                 var filePath = GetEnvironmentName(currentAlias);
                 if (!File.Exists(filePath))
                 {
-                    StatusText.Text = "File not found.";
+                    //StatusText.Text = "File not found.";
+                    ShowStatusAsync("File now found", System.Windows.Media.Brushes.DarkOrange);
                     return;
                 }
 
+                ClearStatusMessage();
                 var text = File.ReadAllText(filePath);
                 var newServer = ServerCombo.Text?.Trim() ?? "";
                 var newDb = DatabaseCombo.Text?.Trim() ?? "";
@@ -906,7 +956,8 @@ namespace ConfigStringManager
 
                             if (string.IsNullOrEmpty(consumerName))
                             {
-                                StatusText.Text = "Connection entry not found in file.";
+                                //StatusText.Text = "Connection entry not found in file.";
+                                ShowStatusAsync("Connection entry not found in file.", System.Windows.Media.Brushes.DarkOrange);
                                 return;
                             }
 
@@ -933,13 +984,15 @@ namespace ConfigStringManager
 
                 File.WriteAllText(filePath, text);
 
-                StatusText.Text = "Saved.";
+                //StatusText.Text = "Saved.";
+                ShowStatusAsync("Saved.",System.Windows.Media.Brushes.DarkRed);
                 //LoadAliases();
                 RefreshUI(GetEnvironmentName(currentAlias), false);
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Error: " + ex.Message;
+                //StatusText.Text = "Error: " + ex.Message;
+                ShowStatusAsync(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
             }
         }
 
@@ -990,7 +1043,7 @@ namespace ConfigStringManager
                 parts.Add("Database=" + newDb);
 
             var s = string.Join(";", parts);
-            if (!s.EndsWith(";")) s += ";";
+            //if (!s.EndsWith(";")) s += ";";
             return s;
         }
 
@@ -1010,12 +1063,105 @@ namespace ConfigStringManager
         {
             return new List<ServerEntry>
             {
-                new ServerEntry { Name = "Server1", Address = "someinstance\\server1" },
-                new ServerEntry { Name = "Server2", Address = "someinstance\\server2" },
-                new ServerEntry { Name = "Server3", Address = "someinstance\\server3" }
+                new ServerEntry { Name = "Activation & Employment Support" , Address = "VSINS-Dev-SQ9\\DEV1" },
+                new ServerEntry { Name = "Sligo Business Improvement" , Address = "VSINS-Dev-SQ9\\DEV2" },
+                new ServerEntry { Name = "Web Self Service" , Address = "VSINS-Dev-SQ9\\DEV3" },
+                new ServerEntry { Name = "Core Platform Team" , Address = "VSINS-Dev-SQ9\\DEV4" },
+                new ServerEntry { Name = "LTSM" , Address = "VSINS-Dev-SQ9\\DEV5" },
+                new ServerEntry { Name = "BOMi Modeling" , Address = "VSINS-Dev-SQ9\\DEV6" },
+                new ServerEntry { Name = "Business Change Team" , Address = "VSINS-Dev-SQ9\\DEV7" },
+                new ServerEntry { Name = "Household Benefit" , Address = "VSINS-Dev-SQ9\\DEV8" },
+                new ServerEntry { Name = "Production Support" , Address = "VSINS-Dev-SQ9\\DEV9" },
+                new ServerEntry { Name = "DEV10" , Address = "VSINS-Dev-SQ9\\DEV10" },
+                new ServerEntry { Name = "FV1" , Address = "vsins-copy-sq01\\COPY1" },
+                new ServerEntry { Name = "FV2" , Address = "vsins-full-sq01\\FULL2" },
+                new ServerEntry { Name = "FV3" , Address = "vsins-full-sq01\\FULL3" },
+                new ServerEntry { Name = "FV4" , Address = "vsins-full-sq01\\FULL4" },
+                new ServerEntry { Name = "FV5" , Address = "vsins-full-sq02\\FULL5" },
+                new ServerEntry { Name = "FV6" , Address = "vsins-full-sq02\\FULL6" },
+                new ServerEntry { Name = "FV7" , Address = "vsins-full-sq02\\FULL7" },
+                new ServerEntry { Name = "FV8" , Address = "vsins-full-sq02\\FULL8" },
+                new ServerEntry { Name = "FV9" , Address = "vsins-full-sq03\\FULL9" },
+                new ServerEntry { Name = "FV10" , Address = "vsins-full-sq03\\FULL10" },
+                new ServerEntry { Name = "FV11" , Address = "vsins-full-sq03\\FULL11" },
+                new ServerEntry { Name = "FV12" , Address = "vsins-full-sq03\\FULL12" },
+                new ServerEntry { Name = "FV13" , Address = "vsins-full-sq04\\FULL13" },
+                new ServerEntry { Name = "FV17" , Address = "vsins-full-sq04\\FULL14" },
+                new ServerEntry { Name = "FV18" , Address = "vsins-full-sq04\\FULL15" },
+                new ServerEntry { Name = "FV19" , Address = "vsins-full-sq04\\FULL16" },
+                new ServerEntry { Name = "FV20" , Address = "cskns-bomi-sql1\\FV20" },
+                new ServerEntry { Name = "FV30" , Address = "CSGNC-BOM-SQ102\\FV30" },
+                new ServerEntry { Name = "FV50" , Address = "vsins-Sim-sq01\\Sim1" },
+                new ServerEntry { Name = "PARTIAL1" , Address = "VSINS-DEV-SQ1\\partial1" },
+                new ServerEntry { Name = "PARTIAL2" , Address = "VSINS-Dev-SQ1\\Partial2" },
+                new ServerEntry { Name = "PARTIAL3" , Address = "VSINS-Dev-SQ1\\Partial3" },
+                new ServerEntry { Name = "PARTIAL4" , Address = "VSINS-Dev-SQ1\\Partial4" },
+                new ServerEntry { Name = "PARTIAL5" , Address = "VSINS-Dev-SQ1\\Partial5" },
+                new ServerEntry { Name = "PARTIAL6" , Address = "VSINS-Dev-SQ1\\Partial6" },
+                new ServerEntry { Name = "PARTIAL7" , Address = "VSINS-Dev-SQ1\\Partial7" },
+                new ServerEntry { Name = "PARTIAL8" , Address = "VSINS-Dev-SQ1\\Partial8" },
+                new ServerEntry { Name = "PARTIAL9" , Address = "VSINS-Dev-SQ1\\Partial9" },
+                new ServerEntry { Name = "PARTIAL10" , Address = "VSINS-Dev-SQ1\\Partial10" },
+                new ServerEntry { Name = "PARTIAL11" , Address = "VSINS-Dev-SQ2\\Partial11" },
+                new ServerEntry { Name = "PARTIAL12" , Address = "VSINS-Dev-SQ2\\Partial12" },
+                new ServerEntry { Name = "PARTIAL13" , Address = "VSINS-Dev-SQ2\\Partial13" },
+                new ServerEntry { Name = "PARTIAL14" , Address = "VSINS-Dev-SQ2\\Partial14" },
+                new ServerEntry { Name = "PARTIAL15" , Address = "VSINS-Dev-SQ2\\Partial15" },
+                new ServerEntry { Name = "PARTIAL16" , Address = "VSINS-Dev-SQ2\\Partial16" },
+                new ServerEntry { Name = "PARTIAL17" , Address = "VSINS-Dev-SQ2\\Partial17" },
+                new ServerEntry { Name = "PARTIAL18" , Address = "VSINS-Dev-SQ2\\Partial18" },
+                new ServerEntry { Name = "PARTIAL19" , Address = "VSINS-Dev-SQ2\\Partial19" },
+                new ServerEntry { Name = "PARTIAL20" , Address = "VSINS-Dev-SQ2\\Partial20" },
+                new ServerEntry { Name = "PARTIAL21" , Address = "VSINS-Dev-SQ3\\Partial21" },
+                new ServerEntry { Name = "PARTIAL22" , Address = "VSINS-Dev-SQ3\\Partial22" },
+                new ServerEntry { Name = "PARTIAL23" , Address = "VSINS-Dev-SQ3\\Partial23" },
+                new ServerEntry { Name = "PARTIAL24" , Address = "VSINS-Dev-SQ3\\Partial24" },
+                new ServerEntry { Name = "PARTIAL25" , Address = "VSINS-Dev-SQ3\\Partial25" },
+                new ServerEntry { Name = "PARTIAL26" , Address = "VSINS-Dev-SQ3\\Partial26" },
+                new ServerEntry { Name = "PARTIAL27" , Address = "VSINS-Dev-SQ3\\Partial27" },
+                new ServerEntry { Name = "PARTIAL28" , Address = "VSINS-Dev-SQ3\\Partial28" },
+                new ServerEntry { Name = "PARTIAL29" , Address = "VSINS-Dev-SQ3\\Partial29" },
+                new ServerEntry { Name = "PARTIAL31" , Address = "VSINS-Dev-SQ4\\Partial31" },
+                new ServerEntry { Name = "PARTIAL32" , Address = "VSINS-Dev-SQ4\\Partial32" },
+                new ServerEntry { Name = "PARTIAL33" , Address = "VSINS-Dev-SQ4\\Partial33" },
+                new ServerEntry { Name = "PARTIAL34" , Address = "VSINS-Dev-SQ4\\Partial34" },
+                new ServerEntry { Name = "PARTIAL35" , Address = "VSINS-Dev-SQ4\\Partial35" },
+                new ServerEntry { Name = "PARTIAL36" , Address = "VSINS-Dev-SQ4\\Partial36" },
+                new ServerEntry { Name = "PARTIAL37" , Address = "VSINS-Dev-SQ4\\Partial37" },
+                new ServerEntry { Name = "PARTIAL38" , Address = "VSINS-Dev-SQ4\\Partial38" },
+                new ServerEntry { Name = "PARTIAL39" , Address = "VSINS-Dev-SQ4\\Partial39" },
+                new ServerEntry { Name = "PARTIAL40" , Address = "VSINS-Dev-SQ4\\Partial40" },
+                new ServerEntry { Name = "PARTIAL41" , Address = "VSINS-Dev-SQ5\\Partial41" },
+                new ServerEntry { Name = "PARTIAL42" , Address = "VSINS-Dev-SQ5\\Partial42" },
+                new ServerEntry { Name = "PARTIAL43" , Address = "VSINS-Dev-SQ5\\Partial43" },
+                new ServerEntry { Name = "PARTIAL44" , Address = "VSINS-DEV-SQ5\\partial44" },
+                new ServerEntry { Name = "PARTIAL45" , Address = "VSINS-Dev-SQ5\\Partial45" },
+                new ServerEntry { Name = "PARTIAL48" , Address = "VSINS-Dev-SQ5\\Partial48" },
+                new ServerEntry { Name = "PARTIAL49" , Address = "VSINS-Dev-SQ5\\Partial49" },
+                new ServerEntry { Name = "PARTIAL50" , Address = "VSINS-Dev-SQ5\\Partial50" },
+                new ServerEntry { Name = "PARTIAL51" , Address = "VSINS-Dev-SQ6\\Partial51" },
+                new ServerEntry { Name = "PARTIAL52" , Address = "VSINS-Dev-SQ6\\Partial52" },
+                new ServerEntry { Name = "PARTIAL53" , Address = "VSINS-Dev-SQ6\\Partial53" },
+                new ServerEntry { Name = "PARTIAL54" , Address = "VSINS-Dev-SQ6\\Partial54" },
+                new ServerEntry { Name = "PARTIAL55" , Address = "VSINS-Dev-SQ6\\Partial55" },
+                new ServerEntry { Name = "PARTIAL56" , Address = "VSINS-Dev-SQ6\\Partial56" },
+                new ServerEntry { Name = "PARTIAL57" , Address = "VSINS-Dev-SQ6\\Partial57" },
+                new ServerEntry { Name = "PARTIAL58" , Address = "VSINS-Dev-SQ6\\Partial58" },
+                new ServerEntry { Name = "PARTIAL59" , Address = "VSINS-Dev-SQ6\\Partial59" },
+                new ServerEntry { Name = "PARTIAL60" , Address = "VSINS-Dev-SQ6\\Partial60" },
+                new ServerEntry { Name = "PARTIAL61" , Address = "VSINS-Dev-SQ7\\Partial61" },
+                new ServerEntry { Name = "PARTIAL62" , Address = "VSINS-Dev-SQ7\\Partial62" },
+                new ServerEntry { Name = "PARTIAL63" , Address = "VSINS-Dev-SQ7\\Partial63" },
+                new ServerEntry { Name = "PARTIAL64" , Address = "VSINS-Dev-SQ7\\Partial64" },
+                new ServerEntry { Name = "Partial65" , Address = "VSINS-Dev-SQ7\\Partial65" },
+                new ServerEntry { Name = "PARTIAL66" , Address = "VSINS-Dev-SQ7\\Partial66" },
+                new ServerEntry { Name = "PARTIAL67" , Address = "VSINS-Dev-SQ7\\Partial67" },
+                new ServerEntry { Name = "PARTIAL68" , Address = "VSINS-Dev-SQ7\\Partial68" },
+                new ServerEntry { Name = "PARTIAL69" , Address = "VSINS-Dev-SQ7\\Partial69" },
+                new ServerEntry { Name = "PARTIAL70" , Address = "VSINS-Dev-SQ7\\Partial70" },
             };
         }
-        
+
         private DevEnvironment GetEnvironment(string name)
         {
             var devEnv = DevEnvs.FirstOrDefault(e => e.Name == name);
@@ -1115,6 +1261,31 @@ namespace ConfigStringManager
             );
         }
 
+        //public async Task ShowStatusAsync(string message, System.Windows.Media.Brush foregroundColor) //, int seconds = 3)
+        public void ShowStatusAsync(string message, System.Windows.Media.Brush foregroundColor) //, int seconds = 3)
+        {
+
+            //StatusMessagePanel.Visibility = Visibility.Visible;
+            //StatusMessage.Text = message;
+            //StatusMessage.Foreground = foregroundColor;
+            //await Task.Delay(seconds * 1000);
+            //StatusMessagePanel.Visibility = Visibility.Collapsed;
+            //textBlock.Text = "";
+            StatusMessagePanel.Visibility = Visibility.Visible;
+            StatusMessage.Text = message;
+            StatusMessage.Foreground = foregroundColor;
+            //await Task.Delay(seconds * 1000);
+            //_statusTimer.Interval = TimeSpan.FromSeconds(seconds); _statusTimer.Stop(); // reset if already running _statusTimer.Start();
+            //panel.Visibility = Visibility.Collapsed;
+        }
+
+        public void ClearStatusMessage()
+        {
+            StatusMessagePanel.Visibility = Visibility.Collapsed;
+            StatusMessage.Text = string.Empty;
+        }
+
         #endregion
+
     }
 }

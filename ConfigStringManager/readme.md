@@ -31,8 +31,10 @@
             - Server dropdown is loaded with a list of servers from "servers.json" file found in ConfigStringManager folder, created in your desktop.
             (The folder is created when the application is ran for the first time)
             - You can edit the file adding or removing servers as needed.
+            - Servers can NOT be updated manually
         - Database
             - If the database is unavailable/unrecheable, the dropdown still shows the database parsed from the file.
+            - Can be updated manually
     
     - Whitespace and formatting are preserved. (Prevent unnecessary changes - Use regex expression instead XDocument to avoid normalizing files)
     
