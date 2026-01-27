@@ -5,14 +5,10 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using System.Xml.Linq;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
-using Brushes = System.Windows.Media.Brush;
-using System.Text;
-using System.Net;
-using System.Windows.Threading;
-using System.Windows.Forms;
 
 namespace ConfigStringManager
 {
@@ -38,7 +34,6 @@ namespace ConfigStringManager
 
         private CancellationTokenSource _dbLoadCts;
         private bool _suppressServerComboEvent = false;
-        //private readonly DispatcherTimer _statusTimer;
 
         private readonly Dictionary<string, List<string>> _databaseCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -49,8 +44,6 @@ namespace ConfigStringManager
             appFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), userFolder);
             Directory.CreateDirectory(appFolder);
             aliasesPath = Path.Combine(appFolder, envFileName);
-
-            //_statusTimer = new DispatcherTimer(); _statusTimer.Tick += (s, e) => { StatusMessage.Visibility = Visibility.Collapsed; _statusTimer.Stop(); };
 
             servers = LoadServers();
 
@@ -85,13 +78,6 @@ namespace ConfigStringManager
                 string json = File.ReadAllText(filePath);
                 var servers = JsonSerializer.Deserialize<List<ServerEntry>>(json);
                 List<ServerEntry> _servers = new List<ServerEntry>();
-                //string strServers = "";
-                //foreach (var item in servers)
-                //{
-                //    strServers += $@"new ServerEntry {{ Name = ""{item.Name}"" , Address = ""{item.Address.Replace("\\", "##")}"" }},\n";
-                //    new ServerEntry { Name = "Server1", Address = "someinstance\\server1" },
-
-                //}
 
                 // If file is empty or invalid, recreate defaults
                 if (servers == null || servers.Count == 0)
@@ -214,17 +200,9 @@ namespace ConfigStringManager
             currentConn = (null, null);
             ServerCombo.ItemsSource = null;
             DatabaseCombo.ItemsSource = null;
-            //clearMessages();
             PanelConnEnabled(false);
         }
-
-        //private void clearMessages()
-        //{
-        //    //StatusMessage.Text = "";
-        //    //StatusText.Text = "";
-        //    //StatusTextFileServers.Text = "";
-        //}
-
+        
         private void PanelConnEnabled(bool enabled)
         {
             ServerCombo.IsEnabled = enabled;
@@ -298,7 +276,6 @@ namespace ConfigStringManager
                         Alias = alias,
                         Element = add,
                         Foreground = System.Windows.Media.Brushes.Black
-                        //FontWeight = FontWeights.UltraBold
                     });
                 }
 
@@ -356,7 +333,7 @@ namespace ConfigStringManager
                     {
                         Name = name,
                         Alias = alias,
-                        Element = descendant,   // IMPORTANT: use descendant, not add
+                        Element = descendant,
                         Foreground = System.Windows.Media.Brushes.Black,
                         FontWeight = FontWeights.Bold
                     });
@@ -371,7 +348,6 @@ namespace ConfigStringManager
                 });
             }
         }
-
 
         private bool ignoreKeyList(string key) { return ignoreKeys.Contains(key); }
 
@@ -398,7 +374,6 @@ namespace ConfigStringManager
             ConnStringsPanel.Visibility = Visibility.Collapsed;
 
             PopulateFileServersCombo();
-            //clearMessages();
         }
 
         private void Root_Selected(object sender, RoutedEventArgs e)
@@ -425,7 +400,6 @@ namespace ConfigStringManager
             ConnStringsPanel.Visibility = Visibility.Collapsed;
 
             PopulateFileServersCombo();
-            //clearMessages();
         }
 
         private async void Conn_Selected(object sender, RoutedEventArgs e)
@@ -443,7 +417,6 @@ namespace ConfigStringManager
             _dbLoadCts = new CancellationTokenSource();
             var token = _dbLoadCts.Token;
 
-            //StatusTextFileServers.Text = string.Empty;
             DatabaseCombo.ItemsSource = null;
 
             currentAlias = entry.Alias;
@@ -489,7 +462,7 @@ namespace ConfigStringManager
             var parsedServer = ParseConn(raw, new[] { "Server", "Data Source", "Address", "Addr" }).Trim('\'', ' ');
             var parsedDb = ParseConn(raw, new[] { "Database", "Initial Catalog" }).Trim('\'', ' ');
 
-            // 🔥 Prevent ServerCombo_SelectionChanged from firing
+            // Prevent ServerCombo_SelectionChanged from firing
             _suppressServerComboEvent = true;
 
             await PopulateServerComboAsync(parsedServer);
@@ -500,14 +473,12 @@ namespace ConfigStringManager
             // Re-enable event
             _suppressServerComboEvent = false;
 
-            // Now safely load DBs
+            // safely load DBs
             await PopulateDatabasesAsync(parsedServer, parsedDb, token);
 
             PanelConnEnabled(true);
-            //StatusText.Text = "";
             AliasPanel.Visibility = Visibility.Collapsed;
             ConnStringsPanel.Visibility = Visibility.Visible;
-            //clearMessages();
         }
 
 
@@ -515,11 +486,10 @@ namespace ConfigStringManager
 
         #region Server management UI
 
-        private async void BtnCopyFilePath_Click(object sender, RoutedEventArgs e)
+        private void BtnCopyFilePath_Click(object sender, RoutedEventArgs e)
         {
             System.Windows.Clipboard.SetText(FilePathText.Text);
-            //StatusTextFileServers.Text = "Copied!";
-            ShowStatusAsync("Copied.", System.Windows.Media.Brushes.DarkRed);
+            ShowMessage("Copied.", System.Windows.Media.Brushes.DarkRed);
         }
 
         private void RenderServerComboItems(string fileServer)
@@ -566,12 +536,11 @@ namespace ConfigStringManager
             Dispatcher.Invoke(() => RenderFileServersCombo(string.Empty));
         }
 
-        private async void BtnUpdateServersOnFile_Click(object sender, RoutedEventArgs e)
+        private void BtnUpdateServersOnFile_Click(object sender, RoutedEventArgs e)
         {
             if ((currentAlias == null || AliasBox.Text.Equals(string.Empty)) && (currentDevEnv == null || AliasBox.Text.Equals(string.Empty)))
             {
-                //StatusTextFileServers.Text = "No file/alias selected.";
-                ShowStatusAsync("No file/alias selected.", System.Windows.Media.Brushes.DarkRed);
+                ShowMessage("No file/alias selected.", System.Windows.Media.Brushes.DarkRed);
                 return;
             }
 
@@ -600,7 +569,7 @@ namespace ConfigStringManager
             }
         }
 
-        private async void updateServersByFile(AliasItem _alias, bool showStatus = false)
+        private void updateServersByFile(AliasItem _alias, bool showStatus = false)
         {
             try
             {
@@ -608,8 +577,7 @@ namespace ConfigStringManager
 
                 if (!File.Exists(filePath))
                 {
-                    //StatusTextFileServers.Text = "File not found.";
-                    ShowStatusAsync("File not found.", System.Windows.Media.Brushes.DarkRed);
+                    ShowMessage("File not found.", System.Windows.Media.Brushes.DarkRed);
                     return;
                 }
 
@@ -686,19 +654,12 @@ namespace ConfigStringManager
 
                 File.WriteAllText(filePath, text);
 
-                //StatusTextFileServers.Text = "Saved!";
-                ////await Task.Delay(3000);
-                //StatusTextFileServers.Text = string.Empty;
-                //if(showStatus)
-                    ShowStatusAsync("Saved!", System.Windows.Media.Brushes.DarkRed);
-
-                //LoadAliases();
+                ShowMessage("Saved!", System.Windows.Media.Brushes.DarkRed);
                 RefreshUI(_alias.EnvironmentName, false);
             }
             catch (Exception ex)
             {
-                //StatusTextFileServers.Text = "Error: " + ex.Message;
-                ShowStatusAsync(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkRed);
+                ShowMessage(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkRed);
             }
         }
 
@@ -725,9 +686,9 @@ namespace ConfigStringManager
             serverAddress = serverAddress.Trim('\'', ' ');
             fileDb = fileDb.Trim('\'', ' ');
 
-            bool serverOk = false;
+            //bool serverOk = false;
 
-            // 1. Check cache first
+            // 1 Check cache first
             if (!string.IsNullOrWhiteSpace(serverAddress) &&
                 _databaseCache.TryGetValue(serverAddress, out var cachedList))
             {
@@ -735,16 +696,16 @@ namespace ConfigStringManager
                 {
                     // Cached successful result
                     dbs = new List<string>(cachedList);
-                    serverOk = true;
+                    //serverOk = true;
                 }
                 else
-                { // Cached failure → skip SQL entirely
-                    serverOk = false;
+                { // Cached failure, skip SQL entirely
+                    //serverOk = false;
                 }
             }
             else if (!string.IsNullOrWhiteSpace(serverAddress))
             {
-                // 2. No cache → try to load from SQL Server
+                // 2 No cache, try to load from SQL Server
                 var entry = FindServerEntry(serverAddress);
 
                 try
@@ -755,7 +716,7 @@ namespace ConfigStringManager
                         InitialCatalog = "master",
                         ConnectTimeout = 3,
                         TrustServerCertificate = true,
-                        IntegratedSecurity = true //entry == null
+                        IntegratedSecurity = true
                     };
 
                     using var conn = new SqlConnection(builder.ConnectionString);
@@ -785,7 +746,8 @@ namespace ConfigStringManager
                 !dbs.Any(d => d.Equals(fileDb, StringComparison.OrdinalIgnoreCase)))
             {
                 //dbs.Insert(0, fileDb);
-                DatabaseCombo.Text = fileDb; // user can still type over this DatabaseCombo.SelectedIndex = -1;
+                DatabaseCombo.Text = fileDb; // user can still type over this
+                DatabaseCombo.SelectedIndex = -1;
             }
 
             await Dispatcher.InvokeAsync(() =>
@@ -815,7 +777,7 @@ namespace ConfigStringManager
             {
                 if (serverAccessible == null)
                 {
-                    ShowStatusAsync("Server not accessible", System.Windows.Media.Brushes.DarkOrange);
+                    ShowMessage("Server not accessible", System.Windows.Media.Brushes.DarkOrange);
                     //DatabaseCombo.IsEnabled = false;
                     //DatabaseCombo.IsEditable = false;
                 }
@@ -839,14 +801,9 @@ namespace ConfigStringManager
             await PopulateDatabasesAsync(server, currentDb, token);
         }
 
-        private void DatabaseCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            //clearMessages();
-        }
-
         #endregion
 
-        private async void BtnReloadFiles_Click(object sender, RoutedEventArgs e)
+        private void BtnReloadFiles_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -857,35 +814,24 @@ namespace ConfigStringManager
                 AliasPanel.Visibility = Visibility.Collapsed;
                 ConnStringsPanel.Visibility = Visibility.Collapsed;
 
-                // Clear UI panels
-                //DatabaseCombo.ItemsSource = null;
-                //ServerCombo.ItemsSource = null;
-
                 // Reload everything
                 LoadAliases();
                 RefreshUI("", false);
-
-                //StatusText.Text = "Reloading files...";
-                //StatusTextFileServers.Text = "";
-
-                //StatusText.Text = "Files reloaded.";
-                ShowStatusAsync("Files Reloaded", System.Windows.Media.Brushes.DarkRed);
+                ShowMessage("Files Reloaded", System.Windows.Media.Brushes.DarkRed);
             }
             catch (Exception ex)
             {
-                //StatusText.Text = "Error reloading files: " + ex.Message;
-                ShowStatusAsync(("Error reloading files: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
+                ShowMessage(("Error reloading files: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
             }
         }
 
         #region Save connection
 
-        private async void BtnSaveConn_Click(object sender, RoutedEventArgs e)
+        private void BtnSaveConn_Click(object sender, RoutedEventArgs e)
         {
             if (currentConn.name == null || currentConn.element == null || currentAlias == null)
             {
-                //StatusText.Text = "No connection selected.";
-                ShowStatusAsync("No connection selected.", System.Windows.Media.Brushes.DarkOrange);
+                ShowMessage("No connection selected.", System.Windows.Media.Brushes.DarkOrange);
                 return;
             }
 
@@ -894,8 +840,7 @@ namespace ConfigStringManager
                 var filePath = GetEnvironmentName(currentAlias);
                 if (!File.Exists(filePath))
                 {
-                    //StatusText.Text = "File not found.";
-                    ShowStatusAsync("File now found", System.Windows.Media.Brushes.DarkOrange);
+                    ShowMessage("File now found", System.Windows.Media.Brushes.DarkOrange);
                     return;
                 }
 
@@ -956,8 +901,7 @@ namespace ConfigStringManager
 
                             if (string.IsNullOrEmpty(consumerName))
                             {
-                                //StatusText.Text = "Connection entry not found in file.";
-                                ShowStatusAsync("Connection entry not found in file.", System.Windows.Media.Brushes.DarkOrange);
+                                ShowMessage("Connection entry not found in file.", System.Windows.Media.Brushes.DarkOrange);
                                 return;
                             }
 
@@ -984,15 +928,12 @@ namespace ConfigStringManager
 
                 File.WriteAllText(filePath, text);
 
-                //StatusText.Text = "Saved.";
-                ShowStatusAsync("Saved.",System.Windows.Media.Brushes.DarkRed);
-                //LoadAliases();
+                ShowMessage("Saved.",System.Windows.Media.Brushes.DarkRed);
                 RefreshUI(GetEnvironmentName(currentAlias), false);
             }
             catch (Exception ex)
             {
-                //StatusText.Text = "Error: " + ex.Message;
-                ShowStatusAsync(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
+                ShowMessage(("Error: " + ex.Message), System.Windows.Media.Brushes.DarkOrange);
             }
         }
 
@@ -1261,22 +1202,11 @@ namespace ConfigStringManager
             );
         }
 
-        //public async Task ShowStatusAsync(string message, System.Windows.Media.Brush foregroundColor) //, int seconds = 3)
-        public void ShowStatusAsync(string message, System.Windows.Media.Brush foregroundColor) //, int seconds = 3)
+        public void ShowMessage(string message, System.Windows.Media.Brush foregroundColor)
         {
-
-            //StatusMessagePanel.Visibility = Visibility.Visible;
-            //StatusMessage.Text = message;
-            //StatusMessage.Foreground = foregroundColor;
-            //await Task.Delay(seconds * 1000);
-            //StatusMessagePanel.Visibility = Visibility.Collapsed;
-            //textBlock.Text = "";
             StatusMessagePanel.Visibility = Visibility.Visible;
             StatusMessage.Text = message;
             StatusMessage.Foreground = foregroundColor;
-            //await Task.Delay(seconds * 1000);
-            //_statusTimer.Interval = TimeSpan.FromSeconds(seconds); _statusTimer.Stop(); // reset if already running _statusTimer.Start();
-            //panel.Visibility = Visibility.Collapsed;
         }
 
         public void ClearStatusMessage()

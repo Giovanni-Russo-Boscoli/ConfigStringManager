@@ -48,12 +48,10 @@
 
         <StackPanel x:Key="tooltipUpdateAllServers">
             <TextBlock>Update all the servers for the selected file</TextBlock>
-            <!--<TextBlock>f2</TextBlock>-->
         </StackPanel>
 
         <StackPanel x:Key="tooltipCopyFilePath">
             <TextBlock>Copy file path to clipboard</TextBlock>
-            <!--<TextBlock>f2</TextBlock>-->
         </StackPanel>
 
         <!-- TreeViewItem styles used by the StyleSelector -->
@@ -88,11 +86,11 @@
                     <ControlTemplate TargetType="ComboBox">
                         <Grid>
                             <ToggleButton Name="ToggleButton"
-                                  Grid.Column="2"
-                                  Focusable="False"
-                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
-                                  ClickMode="Press">
-                                <Path Fill="Black" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                      Grid.Column="2"
+                                      Focusable="False"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      ClickMode="Press">
+                                    <Path Fill="Black" Data="M 0 0 L 4 4 L 8 0 Z"/>
                             </ToggleButton>
 
                             <ContentPresenter Name="ContentSite"
@@ -104,12 +102,12 @@
                                       VerticalAlignment="Center"/>
 
                             <TextBox Name="PART_EditableTextBox"
-                             Margin="3,3,23,3"
-                             VerticalContentAlignment="Center"
-                             MinHeight="24"
-                             Background="Transparent"
-                             Visibility="Hidden"
-                             IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                                     Margin="3,3,23,3"
+                                     VerticalContentAlignment="Center"
+                                     MinHeight="24"
+                                     Background="Transparent"
+                                     Visibility="Hidden"
+                                     IsReadOnly="{TemplateBinding IsReadOnly}"/>
                         </Grid>
                     </ControlTemplate>
                 </Setter.Value>
@@ -118,59 +116,27 @@
 
         <!-- Style selector -->
         <local:TreeViewStyleSelector x:Key="TreeViewSelector"
-                                 EnvStyle="{StaticResource EnvStyle}"
-                                 AliasStyle="{StaticResource AliasStyle}"
-                                 ConnStyle="{StaticResource ConnStyle}"
-                                 MsgStyle="{StaticResource MsgStyle}"/>
+                                     EnvStyle="{StaticResource EnvStyle}"
+                                     AliasStyle="{StaticResource AliasStyle}"
+                                     ConnStyle="{StaticResource ConnStyle}"
+                                     MsgStyle="{StaticResource MsgStyle}"/>
 
     </Window.Resources>
 
-
     <Grid Background="{StaticResource WindowBackgroundBrush}" Margin="12,12,10,12">
 
-       
         <!-- LEFT: Files Tree -->
         <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,530,0">
             <DockPanel>
                 <StackPanel>
                     <Button x:Name="btnReloadFiles" Content="Reload Files" Click="BtnReloadFiles_Click" Margin="10,3" Padding="6,4" HorizontalAlignment="Left"/>
-                    <!--<TreeView x:Name="FilesTree" Width="470" Height="600" Margin="5" />-->
 
-                    <TreeView x:Name="FilesTree"
-                      Width="470"
-                      Height="600"
-                      Margin="5"
-                      ItemsSource="{Binding DevEnvs}"
-                      
-                      ScrollViewer.VerticalScrollBarVisibility="Auto"
-                      ItemContainerStyleSelector="{StaticResource TreeViewSelector}">
-                        <!--ScrollViewer.HorizontalScrollBarVisibility="Disabled"-->
+                    <TreeView x:Name="FilesTree" Width="470" Height="600" Margin="5" ItemsSource="{Binding DevEnvs}" ScrollViewer.VerticalScrollBarVisibility="Auto" ItemContainerStyleSelector="{StaticResource TreeViewSelector}">
                         
                         <TreeView.Resources>
 
-                            <!--<Style TargetType="TreeViewItem">
-                                <Setter Property="Foreground" Value="{Binding Foreground}"/>
-                                --><!--<Setter Property="Background" Value="Transparent"/>--><!--
-                                <Style.Triggers>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        --><!--<Setter Property="Background" Value="#c9c9c9"/>--><!--
-                                        <Setter Property="Foreground" Value="Black"/>
-                                    </Trigger>
-                                </Style.Triggers>
-                            </Style>-->
-
-                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}"
-                                Color="#c9c9c9" />
-                            <!--<SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}"
-                                Color="green" />-->
-                            <!--<SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"
-                                Color="#c9c9c9" />-->
-                            <!--<SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}"
-                                Color="black" />-->
-
+                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#c9c9c9" />
                             <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="Black"/>
-                            <!--<SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="lightblue"/>-->
-
 
                             <!-- DevEnvironment -->
                             <HierarchicalDataTemplate DataType="{x:Type local:DevEnvironment}"
@@ -270,9 +236,6 @@
                         <Button x:Name="btnUpdateFileServers" Click="BtnUpdateServersOnFile_Click" Content="Update" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6" Margin="0"/>
 
                     </StackPanel>
-                    <!--<StackPanel x:Name="StatusTextFileServersPanel">
-                        <TextBlock x:Name="StatusTextFileServers" Foreground="DarkRed" FontWeight="Bold" Margin="10,6,0,0"/>
-                    </StackPanel>-->
 
                 </StackPanel>
 
@@ -300,13 +263,11 @@
                         <StackPanel Width="70">
                             <TextBlock Text="Database" Foreground="{StaticResource MutedBrush}"/>
                         </StackPanel>
-                        <ComboBox x:Name="DatabaseCombo" MinWidth="300" MinHeight="28" IsEditable="true" IsTextSearchEnabled="True"  MaxDropDownHeight="Auto" 
-                                  SelectionChanged="DatabaseCombo_SelectionChanged"></ComboBox>
+                        <ComboBox x:Name="DatabaseCombo" MinWidth="300" MinHeight="28" IsEditable="true" IsTextSearchEnabled="True"  MaxDropDownHeight="Auto"></ComboBox>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="btnSaveChanges"  Content="Save Changes" Click="BtnSaveConn_Click" Background="{StaticResource PanelBrush}" Foreground="Black" Padding="8,6"/>
-                        <!--<TextBlock x:Name="StatusText" Foreground="darkred" FontWeight="Bold" Margin="10,6,0,0"/>-->
                     </StackPanel>
                   
 
